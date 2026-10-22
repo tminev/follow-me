@@ -1,0 +1,3 @@
+import { db } from "@/lib/db";import { requireUserId } from "@/lib/auth";import { apiError,ok } from "@/lib/http";import { publicUserSelect } from "@/lib/public-user";
+export async function GET(){try{const me=await requireUserId();const rows=await db.conversation.findMany({where:{members:{some:{userId:me}}},include:{members:{where:{userId:{not:me}},include:{user:{select:publicUserSelect}}},messages:{where:{deletedAt:null},orderBy:{createdAt:"desc"},take:1}},orderBy:{createdAt:"desc"}});return ok({conversations:rows.map(r=>({id:r.id,person:r.members[0]?.user,lastMessage:r.messages[0]??null}))})}catch(e){return apiError(e)}}
+
