@@ -1,0 +1,16 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 225 165" fill="none">
+  <defs>
+    <linearGradient id="road" x1="12" y1="8" x2="193" y2="145" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff56da"/><stop offset=".25" stop-color="#d68cff"/><stop offset=".48" stop-color="#4cbaff"/><stop offset=".7" stop-color="#1c8dff"/><stop offset="1" stop-color="#f7c8ff"/>
+    </linearGradient>
+    <filter id="roadGlow" x="-35%" y="-25%" width="170%" height="150%">
+      <feGaussianBlur stdDeviation="7" result="b"/><feFlood flood-color="#288dff" flood-opacity=".7"/><feComposite in2="b" operator="in" result="blue"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="p"/><feFlood flood-color="#ff27d4" flood-opacity=".75"/><feComposite in2="p" operator="in" result="pink"/>
+      <feMerge><feMergeNode in="blue"/><feMergeNode in="pink"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#roadGlow)">
+    <path d="M14 5 C16 34 32 61 68 76 L154 104 Q181 115 182 140 L179 161" stroke="url(#road)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M14 5 C16 34 32 61 68 76 L154 104 Q181 115 182 140 L179 161" stroke="#fff4ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
