@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { PushNotifications } from "@/components/PushNotifications";
 import { AuthLanding } from "@/components/AuthLanding";
+import { MapVisibilityPanel } from "@/components/MapVisibilityPanel";
+import { BottomNavigation, NavigationIcon, PeopleDirectory } from "@/components/PeopleDirectory";
 import type { MapMarker } from "@/components/MapCanvas";
 import type { ChatClientEvents, ChatMessage, ChatServerEvents } from "@/lib/chat-socket";
 import { parseProfileVisibility } from "@/lib/profile-visibility";
@@ -14,12 +16,21 @@ async function api(path: string, init?: RequestInit) { const r = await fetch(`/a
 export default function Home() {
   const [me, setMe] = useState<Me | null | undefined>();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [selectedFriendId, setSelectedFriendId] = useState<string>();
   const [notice, setNotice] = useState("");
   const [chatAlerts, setChatAlerts] = useState<ChatAlert[]>([]);
   const [incomingRequestVersion, setIncomingRequestVersion] = useState(0);
   const refresh = () => api("/me").then((data) => setMe(data.user)).catch(() => setMe(null));
+  const showMap = () => { setDirectoryOpen(false); setProfileOpen(false); setSelectedFriendId(undefined); };
+  const showProfile = () => { setDirectoryOpen(false); setProfileOpen(true); };
 
   useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   useEffect(() => { if (!profileOpen) return; const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setProfileOpen(false); }; window.addEventListener("keydown", closeOnEscape); return () => window.removeEventListener("keydown", closeOnEscape); }, [profileOpen]);
   useEffect(() => {
     if (!me) return;
@@ -41,22 +52,19 @@ export default function Home() {
       <div className="brand"><img src="/follow-me-logo.png" alt="Follow Me" onError={(event) => { event.currentTarget.style.display = "none"; }} /><span className="brand-wordmark">Follow<span>Me</span></span><small>Свързване с контрол</small></div>
       <div className="actions">
         <PushNotifications notify={setNotice} />
-        <button className="profile-trigger" aria-label="Отвори профила" title="Профил" onClick={() => setProfileOpen(true)}>
-          {me.profile.avatarUrl ? <img src={me.profile.avatarUrl} alt="" /> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.42 0-8 2.01-8 4.5V20h16v-1.5c0-2.49-3.58-4.5-8-4.5Z" /></svg>}
-        </button>
-        <button className="ghost" onClick={async () => { await api("/auth/logout", { method: "POST" }); setMe(null); }}>Изход</button>
       </div>
     </header>
-    {notice && <div className="notice">{notice}</div>}
+    {notice && <div className="notice" role="status">{notice}</div>}
     <section className="content one-page">
-      <section id="map" className="one-page-section"><MapPanel me={me} notify={setNotice} chatAlerts={chatAlerts} onReadMessages={(handle) => setChatAlerts((alerts) => alerts.filter((alert) => alert.sender.handle !== handle))} /></section>
+      <section id="map" className="one-page-section"><MapPanel me={me} notify={setNotice} chatAlerts={chatAlerts} directoryOpen={directoryOpen} setDirectoryOpen={setDirectoryOpen} selectedFriendId={selectedFriendId} setSelectedFriendId={setSelectedFriendId} onProfile={showProfile} incomingRequestVersion={incomingRequestVersion} onReadMessages={(handle) => setChatAlerts((alerts) => alerts.filter((alert) => alert.sender.handle !== handle))} /></section>
     </section>
     {profileOpen && <div className="profile-modal-backdrop" role="presentation" onMouseDown={() => setProfileOpen(false)}>
       <section className="profile-modal" role="dialog" aria-modal="true" aria-label="Твоят профил" onMouseDown={(event) => event.stopPropagation()}>
         <button type="button" className="modal-close" aria-label="Затвори профила" title="Затвори" onPointerDown={(event) => event.stopPropagation()} onClick={() => setProfileOpen(false)}>×</button>
-        <Profile me={me} reload={refresh} notify={setNotice} />
+        <Profile me={me} reload={refresh} notify={setNotice} onLogout={async () => { await api("/auth/logout", { method: "POST" }); setProfileOpen(false); setMe(null); }} />
       </section>
     </div>}
+    <BottomNavigation active={profileOpen ? "profile" : directoryOpen ? "people" : "map"} onMap={showMap} onPeople={() => { setProfileOpen(false); setDirectoryOpen(true); }} onProfile={showProfile} />
   </main>;
 }
 function Discover({ notify }: { notify: (x: string) => void }) { const [users, setUsers] = useState<Person[]>([]); useEffect(() => { api("/discover/users").then(x => setUsers(x.users)) }, []); return <Panel title="Открий хора" subtitle="Публични профили без имейл, рождена дата или местоположение."><Grid>{users.map(u => <PersonCard key={u.id} p={u}><button className="primary small" onClick={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: u.id }) }); notify("Поканата е изпратена.") } catch (e) { notify((e as Error).message) } }}>Добави</button></PersonCard>)}</Grid></Panel> }
@@ -217,27 +225,63 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
   if (embedded) return <div className="map-chat-replacement"><div className="map-chat-head"><button className="ghost small" onClick={onBack}>← Към картата</button><span>{connected ? "Чат на живо" : "Свързване…"}</span>{onBlock && <button className="chat-block" onClick={onBlock}>Блокирай</button>}</div>{chatLayout}</div>;
   return <Panel title="Чат" subtitle={connected ? "Свързан в реално време. Съобщенията са видими само за участниците." : "Свързване с чата…"}>{chatLayout}</Panel>;
 }
-function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: (x: string) => void; chatAlerts: ChatAlert[]; onReadMessages: (handle: string) => void }) {
+function MapPanel({ me, notify, chatAlerts, onReadMessages, directoryOpen, setDirectoryOpen, selectedFriendId, setSelectedFriendId, onProfile, incomingRequestVersion }: { me: Me; notify: (x: string) => void; chatAlerts: ChatAlert[]; onReadMessages: (handle: string) => void; directoryOpen: boolean; setDirectoryOpen: (open: boolean) => void; selectedFriendId?: string; setSelectedFriendId: (id: string | undefined) => void; onProfile: () => void; incomingRequestVersion: number }) {
   const [state, setState] = useState<{ visible: boolean; session?: { continuous?: boolean } | null }>();
   const [nearby, setNearby] = useState<MapMarker[]>([]);
   const [discoveryRadius, setDiscoveryRadius] = useState<{ meters: number; loyaltyLabel: string }>();
   const [people, setPeople] = useState<Person[]>([]);
-  const [cityQuery, setCityQuery] = useState("");
-  const [audience, setAudience] = useState<"all" | "friends" | "others">("all");
+  const [friends, setFriends] = useState<Person[]>([]);
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
+  const [connectionsError, setConnectionsError] = useState("");
+  const [focusTarget, setFocusTarget] = useState<MapMarker>();
   const [friendIds, setFriendIds] = useState<string[]>([]);
+  const [outgoingRequestIds, setOutgoingRequestIds] = useState<string[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
-  const [invitesOpen, setInvitesOpen] = useState(false);
-  const [selectedInvite, setSelectedInvite] = useState<RequestItem>();
+  useEffect(() => {
+    let active = true;
+    async function refreshOutgoing() {
+      try {
+        const response = await api("/friend-requests?direction=outgoing") as { requests: RequestItem[] };
+        if (active) setOutgoingRequestIds(response.requests.filter((request) => request.status === "PENDING" && request.receiver).map((request) => request.receiver!.id));
+      } catch { /* Sending still validates the current relationship on the server. */ }
+    }
+    void refreshOutgoing();
+    const timer = window.setInterval(() => void refreshOutgoing(), 15000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+  async function sendMapInvitation(person: MapMarker) {
+    await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: person.id }) });
+    setOutgoingRequestIds((ids) => ids.includes(person.id) ? ids : [...ids, person.id]);
+    notify(`Поканата е изпратена до ${person.displayName}.`);
+  }
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Person>();
-  const [selectedFriendId, setSelectedFriendId] = useState<string>();
-  const [directoryOpen, setDirectoryOpen] = useState(false);
   const [drawerHandleY, setDrawerHandleY] = useState(220);
   const drawerHandleMoved = useRef(false);
   const [ownPosition, setOwnPosition] = useState<{ latitude: number; longitude: number }>();
   const proximityState = useRef(new Map<string, boolean>());
   const lastLocationSent = useRef<{ latitude: number; longitude: number; sentAt: number }>();
+  const loadConnections = useCallback(async () => {
+    setConnectionsLoading(true);
+    setConnectionsError("");
+    try {
+      const [friendsResult, requestsResult] = await Promise.all([
+        api("/friends") as Promise<{ friends: Person[] }>,
+        api("/friend-requests?direction=incoming") as Promise<{ requests: RequestItem[] }>,
+      ]);
+      setFriends(friendsResult.friends);
+      setFriendIds(friendsResult.friends.map((person) => person.id));
+      setRequests(requestsResult.requests);
+    } catch (error) {
+      setConnectionsError(error instanceof Error ? error.message : "Списъкът не се зареди. Опитай отново.");
+    } finally { setConnectionsLoading(false); }
+  }, []);
+  useEffect(() => {
+    void loadConnections();
+    const timer = window.setInterval(() => void loadConnections(), 15000);
+    return () => window.clearInterval(timer);
+  }, [loadConnections, directoryOpen, incomingRequestVersion]);
   const load = async () => { const next = await api("/visibility/me"); setState(next); if (next.visible) { const result = await api("/discovery/nearby") as { users: MapMarker[]; radiusMeters: number; loyaltyLabel: string }; setNearby(result.users); setDiscoveryRadius({ meters: result.radiusMeters, loyaltyLabel: result.loyaltyLabel }); } else { setNearby([]); setDiscoveryRadius(undefined); } };
-  useEffect(() => { Promise.all([load(), api("/discover/users").then((result) => setPeople(result.users)), api("/friends").then((result) => setFriendIds(result.friends.map((person: Person) => person.id))), api("/friend-requests?direction=incoming").then((result) => setRequests(result.requests))]).catch((error) => notify((error as Error).message)) }, []);
+  useEffect(() => { Promise.all([load(), api("/discover/users").then((result) => setPeople(result.users))]).catch((error) => notify((error as Error).message)) }, []);
   useEffect(() => { const timer = window.setInterval(() => { Promise.all([load(), api("/discover/users").then((result) => setPeople(result.users))]).catch((error) => notify((error as Error).message)) }, 15000); return () => window.clearInterval(timer) }, []);
   useEffect(() => {
     if (!state?.visible || !navigator.geolocation) { lastLocationSent.current = undefined; return; }
@@ -286,9 +330,6 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
     }
     for (const id of proximityState.current.keys()) if (!activeIds.has(id)) proximityState.current.delete(id);
   }, [nearby, notify, ownPosition, state?.visible]);  const unreadHandles = new Set(chatAlerts.map((alert) => alert.sender.handle));
-  const filteredPeople = people.filter((person) => audience === "all" || (audience === "friends" ? friendIds.includes(person.id) : !friendIds.includes(person.id))).sort((first, second) => Number(unreadHandles.has(second.handle)) - Number(unreadHandles.has(first.handle)));
-  const cities = filteredPeople.reduce<Record<string, Person[]>>((groups, person) => { const city = person.profile.city?.trim() || "Без посочен град"; (groups[city] ??= []).push(person); return groups }, {});
-  const visibleCities = Object.entries(cities).filter(([city]) => city.toLocaleLowerCase("bg").includes(cityQuery.trim().toLocaleLowerCase("bg"))).sort(([a], [b]) => a.localeCompare(b, "bg"));
   async function start(continuous = false) {
     try {
       if (!window.isSecureContext) throw new Error("За GPS на телефон отвори приложението през HTTPS адреса от npm run tunnel.");
@@ -323,15 +364,21 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
     } catch (error) { notify((error as Error).message) }
   }
   async function stop() { await api("/visibility/stop", { method: "POST" }); setNearby([]); setOwnPosition(undefined); notify("Видимостта е изключена."); await load() }
-  async function respondToRequest(request: RequestItem, action: "accept" | "decline") { try { await api(`/friend-requests/${request.id}/${action}`, { method: "POST" }); setRequests((items) => items.filter((item) => item.id !== request.id)); if (action === "accept") { const result = await api("/friends"); setFriendIds(result.friends.map((person: Person) => person.id)); notify("Вече сте приятели.") } } catch (error) { notify((error as Error).message) } }
+  async function respondToRequest(requestId: string, action: "accept" | "decline") {
+    await api(`/friend-requests/${requestId}/${action}`, { method: "POST" });
+    setRequests((items) => items.filter((item) => item.id !== requestId));
+    await loadConnections();
+    notify(action === "accept" ? "Вече сте приятели." : "Поканата е отказана.");
+  }
   async function block(person: Person) { try { await api(`/users/${person.id}/block`, { method: "POST" }); setFriendIds((ids) => ids.filter((id) => id !== person.id)); setPeople((items) => items.filter((item) => item.id !== person.id)); if (selectedFriendId === person.id) setSelectedFriendId(undefined); notify("Потребителят е блокиран.") } catch (error) { notify((error as Error).message) } }
-  function moveDrawerHandle(event: React.PointerEvent<HTMLButtonElement>) { if (!window.matchMedia("(max-width: 800px)").matches) return; event.preventDefault(); const startY = event.clientY; const startTop = drawerHandleY; drawerHandleMoved.current = false; const move = (next: PointerEvent) => { const delta = next.clientY - startY; if (Math.abs(delta) > 4) drawerHandleMoved.current = true; setDrawerHandleY(Math.max(92, Math.min(window.innerHeight - 92, startTop + delta))) }; const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.setTimeout(() => { drawerHandleMoved.current = false }, 0) }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", end) }
+  function moveDrawerHandle(event: React.PointerEvent<HTMLButtonElement>) { if (!window.matchMedia("(max-width: 800px)").matches) return; event.currentTarget.focus(); event.preventDefault(); const startY = event.clientY; const startTop = drawerHandleY; drawerHandleMoved.current = false; const move = (next: PointerEvent) => { const delta = next.clientY - startY; if (Math.abs(delta) > 4) drawerHandleMoved.current = true; setDrawerHandleY(Math.max(92, Math.min(window.innerHeight - 160, startTop + delta))) }; const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.setTimeout(() => { drawerHandleMoved.current = false }, 0) }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", end) }
   return <Panel title="Карта и хора" subtitle="Виж хора по градове; картата се отваря само при доброволно споделена локация.">
-    <div className="map-directory">
-      <div className={`map-card ${selectedFriendId ? "showing-chat" : ""}`}><button className="mobile-directory-handle" style={{ top: drawerHandleY }} onPointerDown={moveDrawerHandle} onClick={() => { if (!drawerHandleMoved.current) setDirectoryOpen(true) }} aria-label="Отвори хора и известия"><b>☰</b></button>{selectedFriendId ? <Chats meId={me.id} openPersonId={selectedFriendId} embedded onBack={() => setSelectedFriendId(undefined)} onBlock={() => { const person = people.find((item) => item.id === selectedFriendId); if (person && window.confirm(`Сигурен ли си, че искаш да блокираш ${person.profile.displayName}?`)) void block(person) }} /> : state?.visible ? <><MapCanvas people={nearby} ownPosition={ownPosition} radiusMeters={discoveryRadius?.meters} onPersonClick={(person) => { if (person.profile) setSelectedPublicProfile({ id: person.id, handle: person.handle, profile: person.profile }); }} /><div className="map-radius" aria-live="polite"><b>Радиус на виждане</b><span>{discoveryRadius ? `${discoveryRadius.meters >= 1000 ? `${discoveryRadius.meters / 1000} км` : `${discoveryRadius.meters} м`} · ${discoveryRadius.loyaltyLabel}` : "Зареждане…"}</span></div><p>{state.session?.continuous ? (nearby.length > 0 ? "Видим си постоянно. Маркерите показват споделените позиции в твоя радиус." : "Видим си постоянно. В момента няма други хора с включена видимост в твоя радиус.") : (nearby.length > 0 ? "Видим си за ограничен срок. Маркерите показват споделените позиции в твоя радиус." : "Видим си за ограничен срок. В момента няма други хора с включена видимост в твоя радиус.")}</p><button className="danger" onClick={stop}>Спри веднага</button></> : <><div className="map-orbit"><span>●</span><b>СКРИТ СЪМ</b></div><p>{me.declaredAdult ? "Картата не се зарежда, докато не включиш доброволно видимост. Сесията изтича автоматично." : "Картата е достъпна само за профили, които са декларирали 18+ и са посочили пълнолетна възраст."}</p><div className="map-visibility-actions"><button className="primary" onClick={() => start()}>Включи за 15 мин.</button><button className="primary" onClick={() => start(true)}>Видим постоянно</button></div></>}</div>
-      {directoryOpen && <button className="directory-backdrop" onClick={() => setDirectoryOpen(false)} aria-label="Затвори панела" />}<aside className={`city-directory ${directoryOpen ? "open" : ""}`}><button className="directory-close" onClick={() => setDirectoryOpen(false)} aria-label="Затвори списъка">×</button><div className="city-status-bar"><div className={`city-invites ${invitesOpen ? "open" : ""}`}><button className="invites-toggle" onClick={() => setInvitesOpen((open) => !open)} aria-expanded={invitesOpen}><span>Покани</span><b>{requests.length}</b></button><div className={`invites-list ${invitesOpen ? "open" : ""}`}>{requests.length > 0 ? requests.map((request) => { const sender = request.sender; const profile = sender?.profile; if (!sender || !profile) return null; return <button type="button" className="invite-summary" key={request.id} onClick={() => setSelectedInvite(request)}>{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span className="invite-avatar">{profile.displayName.slice(0, 1).toUpperCase()}</span>}<span className="invite-summary-copy"><b>{profile.displayName}</b><small>{[profile.city, profile.neighborhood].filter(Boolean).join(" · ") || "Градът не е посочен"}</small>{profile.lookingFor && <em>{profile.lookingFor}</em>}</span><i aria-hidden="true">›</i></button> }) : <small className="invites-empty">Няма нови покани.</small>}</div></div></div><div className="audience-filter" aria-label="Филтър хора"><button className={audience === "friends" ? "active" : ""} aria-pressed={audience === "friends"} onClick={() => setAudience(audience === "friends" ? "all" : "friends")}>Приятели</button><button className={audience === "others" ? "active" : ""} aria-pressed={audience === "others"} onClick={() => setAudience(audience === "others" ? "all" : "others")}>Останали</button></div><input className="city-search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} placeholder="Търси град, например София" aria-label="Търси град" />{visibleCities.map(([city, cityPeople]) => <section key={city} className="city-group">{cityPeople.map((person) => { const isFriend = friendIds.includes(person.id); return <button key={person.id} className={`city-person ${selectedFriendId === person.id ? "selected" : ""}`} title={isFriend ? "Отвори чат" : "Изпрати покана"} onClick={async () => { if (isFriend) { const nextSelected = selectedFriendId === person.id ? undefined : person.id; setSelectedFriendId(nextSelected); if (nextSelected) { setDirectoryOpen(false); onReadMessages(person.handle); } return } setSelectedPublicProfile(person); setDirectoryOpen(false) }}><span>{person.profile.displayName.slice(0, 1).toUpperCase()}</span><div><b>{person.profile.displayName}{unreadHandles.has(person.handle) && <span className="city-message-badge" role="img" aria-label="Ново съобщение" title="Ново съобщение" />}{person.isLocationVisible && <svg className="location-live" viewBox="0 0 24 24" role="img" aria-label="Споделя локация"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z" /></svg>}</b></div><span className="city-person-action" aria-hidden="true">{isFriend ? <svg viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-4.6 4.1c-.65.57-1.65.11-1.65-.76V15.1A3.5 3.5 0 0 1 4 11.5v-6ZM8 8h8M8 11h5" /></svg> : <svg viewBox="0 0 24 24"><path d="M15 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20m6.5-9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19 8v6m-3-3h6" /></svg>}</span></button> })}</section>)}{visibleCities.length === 0 && <p className="city-empty">Няма намерени хора според избрания филтър.</p>}</aside>
+    <div className="map-directory friends-directory-layout">
+      <div className={`map-card ${selectedFriendId ? "showing-chat" : state?.visible ? "map-card-active" : ""}`}><button className="mobile-directory-handle" style={{ top: drawerHandleY }} onPointerDown={moveDrawerHandle} onClick={() => { if (!drawerHandleMoved.current) setDirectoryOpen(true) }} aria-label="Отвори приятели и покани"><NavigationIcon name="chat" /></button>{selectedFriendId ? <Chats meId={me.id} openPersonId={selectedFriendId} embedded onBack={() => setSelectedFriendId(undefined)} onBlock={() => { const person = people.find((item) => item.id === selectedFriendId); if (person && window.confirm(`Сигурен ли си, че искаш да блокираш ${person.profile.displayName}?`)) void block(person) }} /> : state?.visible ? <><MapCanvas focusTarget={focusTarget && nearby.some((person) => person.id === focusTarget.id) ? focusTarget : undefined} people={nearby} ownPosition={ownPosition} radiusMeters={discoveryRadius?.meters} friendIds={friendIds} outgoingRequestIds={outgoingRequestIds} incomingRequestIds={requests.flatMap((request) => request.sender ? [request.sender.id] : [])} onSendInvitation={sendMapInvitation} onPersonClick={(person) => { setSelectedPublicProfile({ id: person.id, handle: person.handle, profile: person.profile ?? { displayName: person.displayName } }); }} /><MapVisibilityPanel continuous={!!state.session?.continuous} radiusMeters={discoveryRadius?.meters} onStop={stop} /></> : <><div className="map-orbit"><span>●</span><b>СКРИТ СЪМ</b></div><p>{me.declaredAdult ? "Картата не се зарежда, докато не включиш доброволно видимост. Сесията изтича автоматично." : "Картата е достъпна само за профили, които са декларирали 18+ и са посочили пълнолетна възраст."}</p><div className="map-visibility-actions"><button className="primary" onClick={() => start()}>Включи за 15 мин.</button><button className="primary" onClick={() => start(true)}>Видим постоянно</button></div></>}</div>
+
     </div>
-    {selectedInvite?.sender && <InvitationPreview request={selectedInvite} onClose={() => setSelectedInvite(undefined)} onRespond={async (action) => { await respondToRequest(selectedInvite, action); setSelectedInvite(undefined); }} />}    {selectedPublicProfile && <PublicProfilePreview person={selectedPublicProfile} onClose={() => setSelectedPublicProfile(undefined)} onSend={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: selectedPublicProfile.id }) }); notify("Поканата е изпратена."); setSelectedPublicProfile(undefined); } catch (error) { notify((error as Error).message); } }} onHideFromMap={async () => { if (!window.confirm(`Сигурен ли си, че искаш ${selectedPublicProfile.profile.displayName} да не вижда местоположението ти на картата?`)) return; try { await api(`/users/${selectedPublicProfile.id}/hide`, { method: "POST" }); setNearby((items) => items.filter((item) => item.id !== selectedPublicProfile.id)); notify("Вече си скрит от този човек на картата."); } catch (error) { notify((error as Error).message); } }} />}
+    {directoryOpen && <PeopleDirectory friends={friends} requests={requests} nearby={state?.visible ? nearby : []} ownPosition={ownPosition} unreadHandles={unreadHandles} loading={connectionsLoading} loadError={connectionsError} onRetry={() => void loadConnections()} onClose={() => setDirectoryOpen(false)} onChat={(person) => { setSelectedFriendId(person.id); setDirectoryOpen(false); onReadMessages(person.handle); }} onLocate={(person) => { setSelectedFriendId(undefined); setFocusTarget({ ...person }); setDirectoryOpen(false); }} onRespond={respondToRequest} onMap={() => { setSelectedFriendId(undefined); setDirectoryOpen(false); }} onProfile={onProfile} />}
+    {selectedPublicProfile && <PublicProfilePreview person={selectedPublicProfile} onClose={() => setSelectedPublicProfile(undefined)} onSend={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: selectedPublicProfile.id }) }); notify("Поканата е изпратена."); setSelectedPublicProfile(undefined); } catch (error) { notify((error as Error).message); } }} onHideFromMap={async () => { if (!window.confirm(`Сигурен ли си, че искаш ${selectedPublicProfile.profile.displayName} да не вижда местоположението ти на картата?`)) return; try { await api(`/users/${selectedPublicProfile.id}/hide`, { method: "POST" }); setNearby((items) => items.filter((item) => item.id !== selectedPublicProfile.id)); notify("Вече си скрит от този човек на картата."); } catch (error) { notify((error as Error).message); } }} />}
   </Panel>
 }
 function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { person: Person; onClose: () => void; onSend: () => Promise<void>; onHideFromMap: () => Promise<void> }) {
@@ -347,7 +394,7 @@ function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { pers
 }function VisibilityToggle({ name, value }: { name: string; value: "PUBLIC" | "FRIENDS" }) {
   const [friendsOnly, setFriendsOnly] = useState(value === "FRIENDS");
   return <label className={`visibility-switch ${friendsOnly ? "friends" : "public"}`}><input type="checkbox" checked={friendsOnly} onChange={(event) => setFriendsOnly(event.target.checked)} aria-label="Видимост: публично или само приятели" /><input type="hidden" name={name} value={friendsOnly ? "FRIENDS" : "PUBLIC"} /><span className="visibility-switch-track" aria-hidden="true"><i /></span><b>{friendsOnly ? "Само приятели" : "Публично"}</b></label>;
-}function Profile({ me, reload, notify }: { me: Me; reload: () => void; notify: (x: string) => void }) {
+}function Profile({ me, reload, notify, onLogout }: { me: Me; reload: () => void; notify: (x: string) => void; onLogout: () => Promise<void> }) {
   const [avatarUrl, setAvatarUrl] = useState(me.profile.avatarUrl ?? "");
   const [saving, setSaving] = useState(false);
   const visibility = parseProfileVisibility(me.profile.profileVisibility);
@@ -431,5 +478,6 @@ function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { pers
     <section className="profile-section"><div className="profile-category-title"><h3>Любими филм и книга</h3><VisibilityToggle name="visibilityFavorites" value={visibility.favorites} /></div><div className="profile-fields two-columns"><label>Любим филм<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteMovie" defaultValue={me.profile.favoriteMovie ?? ""} /></label><label>Любима книга<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteBook" defaultValue={me.profile.favoriteBook ?? ""} /></label></div></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Още за мен</h3><VisibilityToggle name="visibilityProfessional" value={visibility.professional} /></div><div className="profile-fields two-columns"><label>Работа / занимание<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="occupation" defaultValue={me.profile.occupation ?? ""} /></label><label>Образование<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="education" defaultValue={me.profile.education ?? ""} /></label><label className="profile-wide">Езици<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="languages" defaultValue={me.profile.languages ?? ""} placeholder="Български, английски…" /></label></div></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Уикенд и първа среща</h3><VisibilityToggle name="visibilityLifestyle" value={visibility.lifestyle} /></div><div className="profile-fields two-columns"><label>Моят идеален уикенд<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="weekendStyle" defaultValue={me.profile.weekendStyle ?? ""} placeholder="Планина, кино, разходка…" /></label><label>Идея за първа среща<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="firstDateIdea" defaultValue={me.profile.firstDateIdea ?? ""} placeholder="Кафе, музей, игра…" /></label></div></section>    <button className="primary" disabled={saving}>{saving ? "Запазване…" : "Запази профила"}</button>
+    <button type="button" className="ghost" onClick={() => void onLogout().catch((error: Error) => notify(error.message))}>Изход от профила</button>
   </form></Panel>;
 }function Panel({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) { return <><div className="section-head"><h1>{title}</h1><p>{subtitle}</p></div>{children}</> }; function Grid({ children }: { children: React.ReactNode }) { return <div className="grid">{children}</div> }; function PersonCard({ p, children }: { p: Person; children: React.ReactNode }) { return <article className="person"><div className="avatar">{p.profile.displayName[0]}</div><div><h3>{p.profile.displayName}</h3><small>@{p.handle}{p.profile.city ? ` · ${p.profile.city}` : ""}</small><p>{p.profile.bio ?? "Нов човек във Follow Me"}</p></div>{children}</article> }
