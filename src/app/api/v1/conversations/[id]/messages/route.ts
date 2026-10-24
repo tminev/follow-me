@@ -27,10 +27,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const messages = await db.message.findMany({
       where: { conversationId: id, deletedAt: null },
       select: { id: true, body: true, senderId: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
     });
-    return ok({ messages: messages.map((message) => ({ ...message, isMine: message.senderId === me })) });
+    return ok({ messages: messages.reverse().map((message) => ({ ...message, isMine: message.senderId === me })) });
   } catch (error) {
     return apiError(error);
   }
