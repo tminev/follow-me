@@ -1,10 +1,13 @@
 "use client";
 import dynamic from "next/dynamic";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import "@/components/FullscreenChat.css";
 import { io, type Socket } from "socket.io-client";
 import { PushNotifications } from "@/components/PushNotifications";
 import { AuthLanding } from "@/components/AuthLanding";
 import { MapVisibilityPanel } from "@/components/MapVisibilityPanel";
+import { BlockButton } from "@/components/BlockButton";
 import { BottomNavigation, NavigationIcon, PeopleDirectory } from "@/components/PeopleDirectory";
 import type { MapMarker } from "@/components/MapCanvas";
 import type { ChatClientEvents, ChatMessage, ChatServerEvents } from "@/lib/chat-socket";
@@ -102,7 +105,7 @@ function Requests({ notify, refreshToken }: { notify: (x: string) => void; refre
     )}</Grid>
   </Panel>;
 }
-function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId: string; openPersonId?: string; embedded?: boolean; onBack?: () => void; onBlock?: () => void }) {
+function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId: string; openPersonId?: string; embedded?: boolean; onBack?: () => void; onBlock?: () => Promise<void> }) {
   const [list, setList] = useState<Conversation[]>([]);
   const [active, setActive] = useState<Conversation>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -110,25 +113,65 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<Socket<ChatServerEvents, ChatClientEvents> | null>(null);
   const activeId = useRef<string | null>(null);
+  const chatDialog = useRef<HTMLDialogElement>(null);
+  const messageList = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+
+  useEffect(() => {
+    if (!embedded) return;
+    const element = chatDialog.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    element?.showModal();
+    const viewport = window.visualViewport;
+    const resize = () => {
+      if (!element || !viewport) return;
+      element.style.height = `${viewport.height}px`;
+      element.style.top = `${viewport.offsetTop}px`;
+      if (followLatest.current && messageList.current) messageList.current.scrollTop = messageList.current.scrollHeight;
+    };
+    resize();
+    viewport?.addEventListener("resize", resize);
+    viewport?.addEventListener("scroll", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      viewport?.removeEventListener("scroll", resize);
+      element?.close();
+      document.body.style.overflow = overflow;
+      opener?.focus();
+    };
+  }, [embedded]);
+
+  useLayoutEffect(() => {
+    if (followLatest.current && messageList.current) messageList.current.scrollTop = messageList.current.scrollHeight;
+  }, [messages, active?.id]);
 
   const loadMessages = useCallback((id: string) => {
+    setLoadingMessages(true);
     api(`/conversations/${id}/messages`)
       .then((data) => {
-        if (activeId.current === id) setMessages(data.messages);
+        if (activeId.current === id) {
+          const history = (data as { messages: ChatMessage[] }).messages;
+          setMessages((previous) => [...new Map([...history, ...previous].map((message) => [message.id, message])).values()]
+            .sort((first, second) => first.createdAt.localeCompare(second.createdAt) || first.id.localeCompare(second.id)));
+        }
       })
       .catch((reason: unknown) => {
         if (activeId.current === id) setError(reason instanceof Error ? reason.message : "Грешка при зареждане на съобщенията.");
-      });
+      }).finally(() => { if (activeId.current === id) setLoadingMessages(false); });
   }, []);
 
   useEffect(() => {
-    api("/conversations").then((data) => setList(data.conversations));
+    api("/conversations").then((data) => setList((data as { conversations: Conversation[] }).conversations)).catch(() => setError("Разговорите не се заредиха. Затвори чата и опитай отново."));
   }, []);
 
   useEffect(() => {
     const conversation = list.find((item) => item.person?.id === openPersonId);
-    if (!conversation) return;
+    if (!conversation || activeId.current === conversation.id) return;
     activeId.current = conversation.id;
+    followLatest.current = true;
     setMessages([]);
     setError("");
     setActive(conversation);
@@ -158,6 +201,7 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
           : conversation,
       ));
       if (activeId.current === conversationId) {
+        if (message.senderId === meId) followLatest.current = true;
         setMessages((previous) => previous.some((item) => item.id === message.id) ? previous : [...previous, message]);
       }
     });
@@ -167,7 +211,7 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
       socketRef.current = null;
       client.disconnect();
     };
-  }, [loadMessages]);
+  }, [loadMessages, meId]);
 
   useEffect(() => {
     const id = active?.id;
@@ -186,6 +230,7 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
 
   function selectConversation(conversation: Conversation) {
     activeId.current = conversation.id;
+    followLatest.current = true;
     setMessages([]);
     setError("");
     setActive(conversation);
@@ -204,6 +249,8 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
     client.emit("chat:send", { conversationId: conversation.id, body }, (result) => {
       if (result.ok) {
         form.reset();
+        const input = form.querySelector("textarea");
+        if (input) input.style.height = "auto";
         setError("");
       } else {
         setError(result.error === "BLOCKED" ? "Съобщението не може да бъде изпратено." : "Неуспешно изпращане на съобщението.");
@@ -217,12 +264,17 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
     </button>)}</aside>
     <div className="thread">{active ? <>
       <h3>{active.person.profile.displayName}</h3>
-      {error && <p className="error">{error}</p>}
-      <div className="messages">{messages.map((message) => <p key={message.id} className={`bubble ${(message.isMine ?? (message.senderId === meId)) ? "mine" : "theirs"}`}>{message.body}</p>)}</div>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div ref={messageList} className="messages" role="log" aria-label="Съобщения" onScroll={(event) => { const element = event.currentTarget; followLatest.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64; }}>
+        {loadingMessages && messages.length === 0 && <p className="chat-loading" role="status">Зареждане на съобщенията…</p>}
+        {messages.map((message) => <p key={message.id} className={`bubble ${(message.isMine ?? (message.senderId === meId)) ? "mine" : "theirs"}`}>{message.body}</p>)}
+      </div>
       <form onSubmit={send} className="send"><textarea name="body" rows={1} placeholder="Напиши съобщение…" required disabled={!connected} onInput={(event) => { const field = event.currentTarget; field.style.height = "auto"; field.style.height = `${Math.min(field.scrollHeight, 160)}px`; }} /><button className="primary" disabled={!connected}>Изпрати</button></form>
-    </> : <div className="empty">Избери разговор</div>}</div>
+    </> : <div className="empty">{error || "Зареждане на разговора…"}</div>}</div>
   </div>;
-  if (embedded) return <div className="map-chat-replacement"><div className="map-chat-head"><button className="ghost small" onClick={onBack}>← Към картата</button><span>{connected ? "Чат на живо" : "Свързване…"}</span>{onBlock && <button className="chat-block" onClick={onBlock}>Блокирай</button>}</div>{chatLayout}</div>;
+  if (embedded) return createPortal(<dialog ref={chatDialog} className="fullscreen-chat" aria-label={active ? `Чат с ${active.person.profile.displayName}` : "Чат"} onCancel={(event) => { event.preventDefault(); onBack?.(); }}>
+    <div className="fullscreen-chat-heading"><button type="button" className="ghost small" onClick={onBack} aria-label="Затвори чата">← Назад</button><span role="status">{connected ? "Чат на живо" : "Свързване…"}</span>{onBlock && active && <BlockButton name={active.person.profile.displayName} onBlock={onBlock} />}</div>{chatLayout}
+  </dialog>, document.body);
   return <Panel title="Чат" subtitle={connected ? "Свързан в реално време. Съобщенията са видими само за участниците." : "Свързване с чата…"}>{chatLayout}</Panel>;
 }
 function MapPanel({ me, notify, chatAlerts, onReadMessages, directoryOpen, setDirectoryOpen, selectedFriendId, setSelectedFriendId, onProfile, incomingRequestVersion }: { me: Me; notify: (x: string) => void; chatAlerts: ChatAlert[]; onReadMessages: (handle: string) => void; directoryOpen: boolean; setDirectoryOpen: (open: boolean) => void; selectedFriendId?: string; setSelectedFriendId: (id: string | undefined) => void; onProfile: () => void; incomingRequestVersion: number }) {
@@ -233,7 +285,6 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages, directoryOpen, setDi
   const [friends, setFriends] = useState<Person[]>([]);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState("");
-  const [focusTarget, setFocusTarget] = useState<MapMarker>();
   const [friendIds, setFriendIds] = useState<string[]>([]);
   const [outgoingRequestIds, setOutgoingRequestIds] = useState<string[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
@@ -370,14 +421,24 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages, directoryOpen, setDi
     await loadConnections();
     notify(action === "accept" ? "Вече сте приятели." : "Поканата е отказана.");
   }
-  async function block(person: Person) { try { await api(`/users/${person.id}/block`, { method: "POST" }); setFriendIds((ids) => ids.filter((id) => id !== person.id)); setPeople((items) => items.filter((item) => item.id !== person.id)); if (selectedFriendId === person.id) setSelectedFriendId(undefined); notify("Потребителят е блокиран.") } catch (error) { notify((error as Error).message) } }
+  async function block(person: { id: string }) {
+    await api(`/users/${person.id}/block`, { method: "POST" });
+    setFriendIds((ids) => ids.filter((id) => id !== person.id));
+    setFriends((items) => items.filter((item) => item.id !== person.id));
+    setPeople((items) => items.filter((item) => item.id !== person.id));
+    setNearby((items) => items.filter((item) => item.id !== person.id));
+    setRequests((items) => items.filter((item) => item.sender?.id !== person.id && item.receiver?.id !== person.id));
+    setOutgoingRequestIds((ids) => ids.filter((id) => id !== person.id));
+    if (selectedFriendId === person.id) setSelectedFriendId(undefined);
+    notify("Потребителят е блокиран.");
+  }
   function moveDrawerHandle(event: React.PointerEvent<HTMLButtonElement>) { if (!window.matchMedia("(max-width: 800px)").matches) return; event.currentTarget.focus(); event.preventDefault(); const startY = event.clientY; const startTop = drawerHandleY; drawerHandleMoved.current = false; const move = (next: PointerEvent) => { const delta = next.clientY - startY; if (Math.abs(delta) > 4) drawerHandleMoved.current = true; setDrawerHandleY(Math.max(92, Math.min(window.innerHeight - 160, startTop + delta))) }; const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.setTimeout(() => { drawerHandleMoved.current = false }, 0) }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", end) }
   return <Panel title="Карта и хора" subtitle="Виж хора по градове; картата се отваря само при доброволно споделена локация.">
     <div className="map-directory friends-directory-layout">
-      <div className={`map-card ${selectedFriendId ? "showing-chat" : state?.visible ? "map-card-active" : ""}`}><button className="mobile-directory-handle" style={{ top: drawerHandleY }} onPointerDown={moveDrawerHandle} onClick={() => { if (!drawerHandleMoved.current) setDirectoryOpen(true) }} aria-label="Отвори приятели и покани"><NavigationIcon name="chat" /></button>{selectedFriendId ? <Chats meId={me.id} openPersonId={selectedFriendId} embedded onBack={() => setSelectedFriendId(undefined)} onBlock={() => { const person = people.find((item) => item.id === selectedFriendId); if (person && window.confirm(`Сигурен ли си, че искаш да блокираш ${person.profile.displayName}?`)) void block(person) }} /> : state?.visible ? <><MapCanvas focusTarget={focusTarget && nearby.some((person) => person.id === focusTarget.id) ? focusTarget : undefined} people={nearby} ownPosition={ownPosition} radiusMeters={discoveryRadius?.meters} friendIds={friendIds} outgoingRequestIds={outgoingRequestIds} incomingRequestIds={requests.flatMap((request) => request.sender ? [request.sender.id] : [])} onSendInvitation={sendMapInvitation} onPersonClick={(person) => { setSelectedPublicProfile({ id: person.id, handle: person.handle, profile: person.profile ?? { displayName: person.displayName } }); }} /><MapVisibilityPanel continuous={!!state.session?.continuous} radiusMeters={discoveryRadius?.meters} onStop={stop} /></> : <><div className="map-orbit"><span>●</span><b>СКРИТ СЪМ</b></div><p>{me.declaredAdult ? "Картата не се зарежда, докато не включиш доброволно видимост. Сесията изтича автоматично." : "Картата е достъпна само за профили, които са декларирали 18+ и са посочили пълнолетна възраст."}</p><div className="map-visibility-actions"><button className="primary" onClick={() => start()}>Включи за 15 мин.</button><button className="primary" onClick={() => start(true)}>Видим постоянно</button></div></>}</div>
+      <div className={`map-card ${selectedFriendId ? "showing-chat" : state?.visible ? "map-card-active" : ""}`}><button className="mobile-directory-handle" style={{ top: drawerHandleY }} onPointerDown={moveDrawerHandle} onClick={() => { if (!drawerHandleMoved.current) setDirectoryOpen(true) }} aria-label="Отвори приятели и покани"><NavigationIcon name="chat" /></button>{selectedFriendId ? <Chats meId={me.id} openPersonId={selectedFriendId} embedded onBack={() => setSelectedFriendId(undefined)} onBlock={() => block({ id: selectedFriendId })} /> : state?.visible ? <><MapCanvas people={nearby} ownPosition={ownPosition} radiusMeters={discoveryRadius?.meters} friendIds={friendIds} outgoingRequestIds={outgoingRequestIds} incomingRequestIds={requests.flatMap((request) => request.sender ? [request.sender.id] : [])} onSendInvitation={sendMapInvitation} onPersonClick={(person) => { setSelectedPublicProfile({ id: person.id, handle: person.handle, profile: person.profile ?? { displayName: person.displayName } }); }} /><MapVisibilityPanel continuous={!!state.session?.continuous} radiusMeters={discoveryRadius?.meters} onStop={stop} /></> : <><div className="map-orbit"><span>●</span><b>СКРИТ СЪМ</b></div><p>{me.declaredAdult ? "Картата не се зарежда, докато не включиш доброволно видимост. Сесията изтича автоматично." : "Картата е достъпна само за профили, които са декларирали 18+ и са посочили пълнолетна възраст."}</p><div className="map-visibility-actions"><button className="primary" onClick={() => start()}>Включи за 15 мин.</button><button className="primary" onClick={() => start(true)}>Видим постоянно</button></div></>}</div>
 
     </div>
-    {directoryOpen && <PeopleDirectory friends={friends} requests={requests} nearby={state?.visible ? nearby : []} ownPosition={ownPosition} unreadHandles={unreadHandles} loading={connectionsLoading} loadError={connectionsError} onRetry={() => void loadConnections()} onClose={() => setDirectoryOpen(false)} onChat={(person) => { setSelectedFriendId(person.id); setDirectoryOpen(false); onReadMessages(person.handle); }} onLocate={(person) => { setSelectedFriendId(undefined); setFocusTarget({ ...person }); setDirectoryOpen(false); }} onRespond={respondToRequest} onMap={() => { setSelectedFriendId(undefined); setDirectoryOpen(false); }} onProfile={onProfile} />}
+    {directoryOpen && <PeopleDirectory friends={friends} requests={requests} nearby={state?.visible ? nearby : []} ownPosition={ownPosition} unreadHandles={unreadHandles} loading={connectionsLoading} loadError={connectionsError} onRetry={() => void loadConnections()} onClose={() => setDirectoryOpen(false)} onChat={(person) => { setSelectedFriendId(person.id); setDirectoryOpen(false); onReadMessages(person.handle); }} onBlock={block} onRespond={respondToRequest} onMap={() => { setSelectedFriendId(undefined); setDirectoryOpen(false); }} onProfile={onProfile} />}
     {selectedPublicProfile && <PublicProfilePreview person={selectedPublicProfile} onClose={() => setSelectedPublicProfile(undefined)} onSend={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: selectedPublicProfile.id }) }); notify("Поканата е изпратена."); setSelectedPublicProfile(undefined); } catch (error) { notify((error as Error).message); } }} onHideFromMap={async () => { if (!window.confirm(`Сигурен ли си, че искаш ${selectedPublicProfile.profile.displayName} да не вижда местоположението ти на картата?`)) return; try { await api(`/users/${selectedPublicProfile.id}/hide`, { method: "POST" }); setNearby((items) => items.filter((item) => item.id !== selectedPublicProfile.id)); notify("Вече си скрит от този човек на картата."); } catch (error) { notify((error as Error).message); } }} />}
   </Panel>
 }

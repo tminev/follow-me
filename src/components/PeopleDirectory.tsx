@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { distanceInMeters } from "@/lib/discovery-radius";
 import type { MapMarker } from "./MapCanvas";
+import { BlockButton } from "./BlockButton";
 import "./PeopleDirectory.css";
 
 export type DirectoryPerson = {
@@ -27,11 +28,11 @@ export function BottomNavigation({ active, onMap, onPeople, onProfile }: Navigat
   </nav>;
 }
 
-export function PeopleDirectory({ friends, requests, nearby, ownPosition, unreadHandles, loading, loadError, onRetry, onClose, onChat, onLocate, onRespond, onMap, onProfile }: {
+export function PeopleDirectory({ friends, requests, nearby, ownPosition, unreadHandles, loading, loadError, onRetry, onClose, onChat, onBlock, onRespond, onMap, onProfile }: {
   friends: DirectoryPerson[]; requests: DirectoryRequest[]; nearby: MapMarker[];
   ownPosition?: { latitude: number; longitude: number }; unreadHandles: Set<string>;
   loading: boolean; loadError: string; onRetry: () => void;
-  onClose: () => void; onChat: (person: DirectoryPerson) => void; onLocate: (person: MapMarker) => void;
+  onClose: () => void; onChat: (person: DirectoryPerson) => void; onBlock: (person: DirectoryPerson) => Promise<void>;
   onRespond: (requestId: string, action: "accept" | "decline") => Promise<void>;
   onMap: () => void; onProfile: () => void;
 }) {
@@ -107,7 +108,7 @@ export function PeopleDirectory({ friends, requests, nearby, ownPosition, unread
             const name = person.profile?.displayName || person.handle;
             return <article key={person.id} className="people-card">{identity(person, point)}<div className="people-card-actions">
               <button type="button" className="people-card-chat" aria-label={`Отвори чат с ${name}`} onClick={() => onChat(person)}><NavigationIcon name="chat" /></button>
-              <button type="button" className="people-card-locate" aria-label={`Покажи ${name} на картата`} title={point ? "Покажи на картата" : "Няма споделена позиция в твоя радиус"} disabled={!point} onClick={() => { if (point) onLocate(point); }}><NavigationIcon name="map" /></button>
+              <BlockButton name={name} iconOnly onBlock={() => onBlock(person)} />
             </div></article>;
           })}</div>
           {!visibleFriends.length && !loading && !loadError && <p className="people-directory-empty">{search ? "Няма приятели с това име или град." : "Все още нямаш приятели. Изпрати покана на човек от картата."}</p>}
