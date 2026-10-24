@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useRef, useState } from "react";
+import "./AuthLanding.css";
 
 type AuthLandingProps = {
   onDone?: () => void;
