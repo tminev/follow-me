@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
+import "./login/login.css";
 
 export const metadata: Metadata = {
   title: "Follow Me",
@@ -24,6 +25,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="bg">
+      <head>
+        <link rel="preload" href="/login-pin-star-underline.png" as="image" />
+        <link rel="preload" href="/login-pin-star.png" as="image" />
+      </head>
       <body>{children}</body>
     </html>
   );
