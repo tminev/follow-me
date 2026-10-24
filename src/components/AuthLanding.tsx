@@ -20,7 +20,7 @@ async function authenticate(path: string, body: unknown) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(typeof data?.message === "string" ? data.message : "ÐÐµÑƒÑÐ¿ÐµÑˆÐµÐ½ Ð¾Ð¿Ð¸Ñ‚. ÐžÐ¿Ð¸Ñ‚Ð°Ð¹ Ð¾Ñ‚Ð½Ð¾Ð²Ð¾.");
+    throw new Error(typeof data?.message === "string" ? data.message : "Неуспешен опит. Опитай отново.");
   }
 }
 
@@ -53,7 +53,7 @@ export function AuthLanding({ onDone }: AuthLandingProps) {
     const form = new FormData(event.currentTarget);
     const handle = String(form.get("handle") ?? "");
     if (register && !/^[a-zA-Z0-9_]{3,24}$/.test(handle)) {
-      setError("ÐŸÐ¾Ñ‚Ñ€ÐµÐ±Ð¸Ñ‚ÐµÐ»ÑÐºÐ¾Ñ‚Ð¾ Ð¸Ð¼Ðµ Ðµ Ñ 3â€“24 Ð»Ð°Ñ‚Ð¸Ð½ÑÐºÐ¸ Ð±ÑƒÐºÐ²Ð¸, Ñ†Ð¸Ñ„Ñ€Ð¸ Ð¸Ð»Ð¸ _. ");
+      setError("Потребителското име е с 3–24 латински букви, цифри или _. ");
       return;
     }
     setSubmitting(true);
@@ -65,7 +65,7 @@ export function AuthLanding({ onDone }: AuthLandingProps) {
       if (onDone) onDone();
       else window.location.assign("/");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "ÐÐµÑƒÑÐ¿ÐµÑˆÐµÐ½ Ð¾Ð¿Ð¸Ñ‚. ÐžÐ¿Ð¸Ñ‚Ð°Ð¹ Ð¾Ñ‚Ð½Ð¾Ð²Ð¾.");
+      setError(cause instanceof Error ? cause.message : "Неуспешен опит. Опитай отново.");
     } finally {
       setSubmitting(false);
     }
@@ -75,7 +75,7 @@ export function AuthLanding({ onDone }: AuthLandingProps) {
     <div className="auth-grid" aria-hidden="true" />
 
     <section className="auth-intro">
-      <button type="button" className="auth-logo" aria-label="ÐÐºÑ‚Ð¸Ð²Ð¸Ñ€Ð°Ð¹ Ð°Ð½Ð¸Ð¼Ð°Ñ†Ð¸ÑÑ‚Ð° Ð½Ð° Ð»Ð¾Ð³Ð¾Ñ‚Ð¾" onClick={() => setLogoAwake((value) => !value)}>
+      <button type="button" className="auth-logo" aria-label="Активирай анимацията на логото" onClick={() => setLogoAwake((value) => !value)}>
         <span className="auth-logo-container">
           <span className="auth-logo-artwork">
             <img className="auth-logo-background" src="/follow-me-logo-base-v3.png" alt="Follow Me" />
@@ -135,34 +135,34 @@ export function AuthLanding({ onDone }: AuthLandingProps) {
       </button>
       <div className="auth-copy">
         <span className="auth-kicker"><i /> FOLLOW ME</span>
-        <h1>Ð¡Ñ€ÐµÑ‰Ð¸Ñ‚Ðµ Ð·Ð°Ð¿Ð¾Ñ‡Ð²Ð°Ñ‚<br /><em>Ð½Ð°Ð±Ð»Ð¸Ð·Ð¾.</em></h1>
-        <p>ÐžÑ‚ÐºÑ€Ð¸Ð²Ð°Ð¹ Ñ…Ð¾Ñ€Ð° Ð¾ÐºÐ¾Ð»Ð¾ ÑÐµÐ±Ðµ ÑÐ¸, ÑÐ¿Ð¾Ð´ÐµÐ»ÑÐ¹ Ð¿Ñ€Ð¸ÑÑŠÑÑ‚Ð²Ð¸Ðµ ÑÐ°Ð¼Ð¾ Ð¿Ð¾ Ñ‚Ð²Ð¾Ð¹ Ð¸Ð·Ð±Ð¾Ñ€ Ð¸ Ð·Ð°Ð¿Ð¾Ñ‡Ð²Ð°Ð¹ Ñ€Ð°Ð·Ð³Ð¾Ð²Ð¾Ñ€, ÐºÐ¾Ð³Ð°Ñ‚Ð¾ Ð¼Ð¾Ð¼ÐµÐ½Ñ‚ÑŠÑ‚ Ðµ Ð¿Ñ€Ð°Ð²Ð¸Ð»ÐµÐ½.</p>
+        <h1>Срещите започват<br /><em>наблизо.</em></h1>
+        <p>Откривай хора около себе си, споделяй присъствие само по твой избор и започвай разговор, когато моментът е правилен.</p>
       </div>
-      <div className="auth-features" aria-label="Ð’ÑŠÐ·Ð¼Ð¾Ð¶Ð½Ð¾ÑÑ‚Ð¸">
-        <span><b>âŒ–</b> Ð¢Ð¸ Ð¸Ð·Ð±Ð¸Ñ€Ð°Ñˆ Ð²Ð¸Ð´Ð¸Ð¼Ð¾ÑÑ‚Ñ‚Ð°</span>
-        <span><b>âœ¦</b> Ð¥Ð¾Ñ€Ð° Ð¾Ñ‚ Ñ‚Ð²Ð¾Ñ Ñ€Ð°Ð¹Ð¾Ð½</span>
-        <span><b>â—Œ</b> Ð›Ð¸Ñ‡Ð½Ð¸ Ñ€Ð°Ð·Ð³Ð¾Ð²Ð¾Ñ€Ð¸</span>
+      <div className="auth-features" aria-label="Възможности">
+        <span><b>⌖</b> Ти избираш видимостта</span>
+        <span><b>✦</b> Хора от твоя район</span>
+        <span><b>◎</b> Лични разговори</span>
       </div>
     </section>
 
-    <section className="auth-panel" aria-label={register ? "Ð ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°Ñ†Ð¸Ñ" : "Ð’Ñ…Ð¾Ð´"}>
+    <section className="auth-panel" aria-label={register ? "Регистрация" : "Вход"}>
       <form className="auth-form" onSubmit={submit}>
         <header>
-          <span className="auth-form-mark">{register ? "+" : "â†—"}</span>
-          <div><h2>{register ? "Ð¡ÑŠÐ·Ð´Ð°Ð¹ ÑÐ²Ð¾Ñ Ð¿Ñ€Ð¾Ñ„Ð¸Ð»" : "Ð”Ð¾Ð±Ñ€Ðµ Ð´Ð¾ÑˆÑŠÐ» Ð¾Ñ‚Ð½Ð¾Ð²Ð¾"}</h2><p>{register ? "Ð—Ð°Ð¿Ð¾Ñ‡Ð²Ð°Ñˆ Ð½ÐµÐ²Ð¸Ð´Ð¸Ð¼. Ð¢Ð¸ Ñ€ÐµÑˆÐ°Ð²Ð°Ñˆ ÐºÐ¾Ð³Ð° Ð´Ð° ÑÐµ Ð¿Ð¾ÐºÐ°Ð¶ÐµÑˆ." : "Ð’Ð»ÐµÐ· Ð¸ Ð²Ð¸Ð¶ ÐºÐ°ÐºÐ²Ð¾ ÑÐµ ÑÐ»ÑƒÑ‡Ð²Ð° Ð¾ÐºÐ¾Ð»Ð¾ Ñ‚ÐµÐ±."}</p></div>
+          <span className="auth-form-mark">{register ? "+" : "↗"}</span>
+          <div><h2>{register ? "Създай своя профил" : "Добре дошъл отново"}</h2><p>{register ? "Започваш невидим. Ти решаваш кога да се покажеш." : "Влез и виж какво се случва около теб."}</p></div>
         </header>
         {error && <div className="auth-error" role="alert">{error}</div>}
-        <label>Ð˜Ð¼ÐµÐ¹Ð»<input name="email" type="email" autoComplete="email" placeholder="you@email.com" required /></label>
+        <label>Имейл<input name="email" type="email" autoComplete="email" placeholder="you@email.com" required /></label>
         {register && <div className="auth-form-split">
-          <label>ÐŸÐ¾Ñ‚Ñ€ÐµÐ±Ð¸Ñ‚ÐµÐ»ÑÐºÐ¾ Ð¸Ð¼Ðµ<input name="handle" pattern="[a-zA-Z0-9_]{3,24}" title="3â€“24 Ð»Ð°Ñ‚Ð¸Ð½ÑÐºÐ¸ Ð±ÑƒÐºÐ²Ð¸, Ñ†Ð¸Ñ„Ñ€Ð¸ Ð¸Ð»Ð¸ _" placeholder="alex_01" required /></label>
-          <label>Ð˜Ð¼Ðµ Ð·Ð° Ð¿Ð¾ÐºÐ°Ð·Ð²Ð°Ð½Ðµ<input name="displayName" autoComplete="name" placeholder="ÐÐ»ÐµÐºÑ" required /></label>
+          <label>Потребителско име<input name="handle" pattern="[a-zA-Z0-9_]{3,24}" title="3–24 латински букви, цифри или _" placeholder="alex_01" required /></label>
+          <label>Име за показване<input name="displayName" autoComplete="name" placeholder="Алекс" required /></label>
         </div>}
-        {register && <label>Ð”Ð°Ñ‚Ð° Ð½Ð° Ñ€Ð°Ð¶Ð´Ð°Ð½Ðµ<input name="dateOfBirth" type="date" required /></label>}
-        <label>ÐŸÐ°Ñ€Ð¾Ð»Ð°<input name="password" type="password" autoComplete={register ? "new-password" : "current-password"} minLength={8} placeholder="ÐœÐ¸Ð½Ð¸Ð¼ÑƒÐ¼ 8 ÑÐ¸Ð¼Ð²Ð¾Ð»Ð°" required /></label>
-        {register && <label className="auth-adult"><input name="declaredAdult" type="checkbox" required /><span>Ð”ÐµÐºÐ»Ð°Ñ€Ð¸Ñ€Ð°Ð¼, Ñ‡Ðµ ÑÑŠÐ¼ Ð½Ð° 18+.</span></label>}
-        <button className="auth-submit" disabled={submitting}>{submitting ? "ÐœÐ¾Ð¼ÐµÐ½Ñ‚â€¦" : register ? "Ð¡ÑŠÐ·Ð´Ð°Ð¹ Ð¿Ñ€Ð¾Ñ„Ð¸Ð»" : "Ð’Ð»ÐµÐ· Ð² Follow Me"}<span>â†’</span></button>
+        {register && <label>Дата на раждане<input name="dateOfBirth" type="date" required /></label>}
+        <label>Парола<input name="password" type="password" autoComplete={register ? "new-password" : "current-password"} minLength={8} placeholder="Минимум 8 символа" required /></label>
+        {register && <label className="auth-adult"><input name="declaredAdult" type="checkbox" required /><span>Декларирам, че съм на 18+.</span></label>}
+        <button className="auth-submit" disabled={submitting}>{submitting ? "Момент…" : register ? "Създай профил" : "Влез в Follow Me"}<span>→</span></button>
       </form>
-      <p className="auth-footer">{register ? "Ð’ÐµÑ‡Ðµ Ð¸Ð¼Ð°Ñˆ Ð¿Ñ€Ð¾Ñ„Ð¸Ð»? " : "ÐÑÐ¼Ð°Ñˆ Ð¿Ñ€Ð¾Ñ„Ð¸Ð»? "}<button type="button" onClick={() => { setRegister(!register); setError(""); }}>{register ? "Ð’Ð»ÐµÐ·" : "Ð ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€Ð°Ð¹ ÑÐµ"}</button></p>
+      <p className="auth-footer">{register ? "Вече имаш профил? " : "Нямаш профил? "}<button type="button" onClick={() => { setRegister(!register); setError(""); }}>{register ? "Влез" : "Регистрирай се"}</button></p>
     </section>
   </main>;
 }
