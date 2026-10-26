@@ -80,8 +80,21 @@ export function AuthLanding({ onDone }: AuthLandingProps) {
           <span className="auth-logo-artwork">
             <img className="auth-logo-background" src="/follow-me-logo-base-v3.png" alt="Follow Me" />
             <img className="auth-logo-main-pin" src="/main-location-pin.png" alt="" aria-hidden="true" />
-            <img className="auth-logo-piece auth-logo-piece-curve-long" src="/login-logo-layer-5.png" alt="" aria-hidden="true" />
-            <img className="auth-logo-piece auth-logo-piece-curve-short" src="/login-logo-layer-4.png" alt="" aria-hidden="true" />
+            <span className="auth-curve-long-track" aria-hidden="true">
+              <img className="auth-logo-piece auth-logo-piece-curve-long" src="/login-logo-layer-5.png" alt="" />
+              <svg className="auth-curve-long-signal" viewBox="0 0 385 192">
+                <defs>
+                  <filter id="curve-long-signal-glow" x="-300%" y="-300%" width="600%" height="600%">
+                    <feGaussianBlur stdDeviation="9" result="glow" />
+                    <feMerge><feMergeNode in="glow" /><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                </defs>
+                <circle className="auth-curve-long-signal-dot" cx="0" cy="0" r="6" filter="url(#curve-long-signal-glow)">
+                  <animateMotion dur="7.6s" repeatCount="indefinite" path="M 68 9 C 151 25 279 63 345 88 C 365 96 377 105 373 116 C 369 124 360 128 345 130 C 260 153 130 162 5 176" keyPoints="0;1;0" keyTimes="0;0.5;1" calcMode="linear" />
+                </circle>
+              </svg>
+            </span>
+            <img className="auth-logo-piece auth-logo-piece-curve-short" src="/login-logo-curve-short-v2.png" alt="" aria-hidden="true" />
             <svg className="auth-road-lights" viewBox="0 0 1254 1254" aria-hidden="true">
               <defs>
                 <filter id="road-light-blue" x="-200%" y="-200%" width="400%" height="400%">
@@ -107,7 +120,7 @@ export function AuthLanding({ onDone }: AuthLandingProps) {
               </circle>
             </svg>
             <img className="auth-logo-wordmark" src="/follow-me-wordmark-final.png" alt="" aria-hidden="true" />
-            <img className="auth-logo-piece auth-logo-piece-arrow" src="/login-logo-layer-3.png" alt="" aria-hidden="true" />
+            <img className="auth-logo-piece auth-logo-piece-arrow" src="/login-logo-arrow-v2.png" alt="" aria-hidden="true" />
             <span className="auth-chat-impulse auth-chat-impulse-outgoing" aria-hidden="true" />
             <span className="auth-chat-impulse auth-chat-impulse-returning" aria-hidden="true" />
             <svg className="auth-signal-network" viewBox="0 0 1254 1254" aria-hidden="true">
