@@ -18,6 +18,15 @@ export default function Home() {
   const [chatAlerts, setChatAlerts] = useState<ChatAlert[]>([]);
   const [incomingRequestVersion, setIncomingRequestVersion] = useState(0);
   const refresh = () => api("/me").then((data) => setMe(data.user)).catch(() => setMe(null));
+  const logout = async () => {
+    try {
+      await api("/auth/logout", { method: "POST" });
+      setProfileOpen(false);
+      setMe(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Неуспешен изход от профила.");
+    }
+  };
 
   useEffect(() => { refresh(); }, []);
   useEffect(() => { if (!profileOpen) return; const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setProfileOpen(false); }; window.addEventListener("keydown", closeOnEscape); return () => window.removeEventListener("keydown", closeOnEscape); }, [profileOpen]);
@@ -44,7 +53,7 @@ export default function Home() {
         <button className="profile-trigger" aria-label="Отвори профила" title="Профил" onClick={() => setProfileOpen(true)}>
           {me.profile.avatarUrl ? <img src={me.profile.avatarUrl} alt="" /> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.42 0-8 2.01-8 4.5V20h16v-1.5c0-2.49-3.58-4.5-8-4.5Z" /></svg>}
         </button>
-        <button className="ghost" onClick={async () => { await api("/auth/logout", { method: "POST" }); setMe(null); }}>Изход</button>
+        <button type="button" className="ghost small header-logout" onClick={() => void logout()}>Изход</button>
       </div>
     </header>
     {notice && <div className="notice">{notice}</div>}
@@ -425,7 +434,7 @@ function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { pers
     <section className="profile-photo-row"><div className="profile-photo-preview">{avatarUrl ? <img src={avatarUrl} alt="Твоя профилна снимка" /> : <span>{me.profile.displayName.slice(0, 1).toUpperCase()}</span>}<label className="profile-photo-change" title="Избери снимка" aria-label="Избери профилна снимка"><input className="profile-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={choosePhoto} /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Zm16.7-9.7a1 1 0 0 0 0-1.4l-2.1-2.1a1 1 0 0 0-1.4 0l-1.6 1.6L19.1 8l1.6-1.5Z" /></svg></label></div><div><b>Профилна снимка</b><small>JPG, PNG, WebP или GIF до 10 MB.</small><div className="profile-inline-visibility"><span>Видимост</span><VisibilityToggle name="visibilityPhoto" value={visibility.photo} /></div>{avatarUrl && <button type="button" className="link profile-photo-remove" onClick={() => setAvatarUrl("")}>Премахни снимката</button>}</div></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Местоположение</h3><VisibilityToggle name="visibilityLocation" value={visibility.location} /></div><div className="profile-fields two-columns"><label>Град<input name="city" defaultValue={me.profile.city ?? ""} /></label><label>Квартал<input name="neighborhood" defaultValue={me.profile.neighborhood ?? ""} placeholder="Например Лозенец" /></label></div></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Външен вид</h3><VisibilityToggle name="visibilityAppearance" value={visibility.appearance} /></div><div className="profile-fields two-columns"><label>Ръст (см)<input name="heightCm" type="number" min="120" max="240" defaultValue={me.profile.heightCm ?? ""} /></label><label>Цвят на косата<input name="hairColor" defaultValue={me.profile.hairColor ?? ""} placeholder="Например кестенява" /></label></div></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>За мен</h3><VisibilityToggle name="visibilityAbout" value={visibility.about} /></div><label>Име<input name="displayName" defaultValue={me.profile.displayName} required /></label><label>Описание<textarea name="bio" maxLength={500} defaultValue={me.profile.bio ?? ""} placeholder="Няколко думи за теб…" /></label></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>За мен</h3><VisibilityToggle name="visibilityAbout" value={visibility.about} /></div><label>Име<input name="displayName" defaultValue={me.profile.displayName} required /></label><label>Описание<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="bio" maxLength={500} defaultValue={me.profile.bio ?? ""} placeholder="Няколко думи за теб…" /></label></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Какво търся</h3><VisibilityToggle name="visibilityIntentions" value={visibility.intentions} /></div><label>Намерения<select name="lookingFor" defaultValue={me.profile.lookingFor ?? ""}><option value="">Не е посочено</option><option>Сериозна връзка</option><option>Опознаване</option><option>Приключение</option><option>Приятелство</option><option>Игра и общи хобита</option></select></label></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Интереси</h3><VisibilityToggle name="visibilityInterests" value={visibility.interests} /></div><label>Интереси<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="interestsText" defaultValue={me.profile.interestsText ?? ""} placeholder="Пътувания, фитнес, настолни игри…" /></label></section>
     <section className="profile-section"><div className="profile-category-title"><h3>Любими филм и книга</h3><VisibilityToggle name="visibilityFavorites" value={visibility.favorites} /></div><div className="profile-fields two-columns"><label>Любим филм<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteMovie" defaultValue={me.profile.favoriteMovie ?? ""} /></label><label>Любима книга<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteBook" defaultValue={me.profile.favoriteBook ?? ""} /></label></div></section>
