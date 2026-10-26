@@ -23,9 +23,11 @@ export function MapVisibilityPanel({ continuous, radiusMeters, onStop }: {
   }
 
   return <section className="map-visibility-panel" aria-label="Управление на видимостта">
+    <div className="map-visibility-panel-handle" aria-hidden="true" />
     <div className="map-visibility-panel-copy">
       <span className="map-visibility-panel-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg></span>
-      <div><h2>{continuous ? "Видим постоянно" : "Видим за 15 мин."}</h2>
+      <div><h2>{continuous ? "Постоянната видимост е включена" : "Видимостта е включена за 15 минути"}</h2>
+        <p>Виждаш хора наблизо, които доброволно споделят локацията си.</p>
         {radiusMeters !== undefined && <small>Радиус: {radiusMeters >= 1000 ? `${radiusMeters / 1000} км` : `${radiusMeters} м`}</small>}
       </div>
     </div>
