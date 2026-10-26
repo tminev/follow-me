@@ -1,4 +1,4 @@
-type Presence = { latitude: number; longitude: number; accuracyMeters: number; expiresAt: number };
+export type Presence = { latitude: number; longitude: number; accuracyMeters: number; expiresAt: number; updatedAt: number };
 const globalPresence = globalThis as unknown as { followMePresence?: Map<string, Presence> };
 export const presence = globalPresence.followMePresence ?? new Map<string, Presence>();
 if (process.env.NODE_ENV !== "production") globalPresence.followMePresence = presence;

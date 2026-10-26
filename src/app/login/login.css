@@ -77,44 +77,17 @@
   .auth-logo{width:min(100%,calc(100dvh - 64px),180px);min-width:110px}
 }
 
-/* Temporary alignment guides for the two circular artwork layers. */
-.auth-logo-artwork > .auth-logo-background {
-  box-sizing: border-box;
-  border: 1px solid #58c7ff;
-  border-radius: 50%;
-}
-.auth-debug-road-boundary {
-  fill: none;
-  stroke: #ff58c9;
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-/* Align debug guide and moving-light mask to the real neon rim, not the PNG square. */
 .auth-logo-artwork > .auth-logo-background {
   border: 0;
   border-radius: 0;
-}
-.auth-logo-artwork::after {
-  content: "";
-  position: absolute;
-  z-index: 5;
-  inset: 5.5%;
-  box-sizing: border-box;
-  border: 1px solid #58c7ff;
-  border-radius: 50%;
-  pointer-events: none;
 }
 .auth-road-lights {
   clip-path: circle(44.5% at 50% 50%);
 }
 
 /* The artwork rim is subtly vertically compressed at the bottom. */
-.auth-logo-artwork::after { inset: 5.5% 5.5% 8% 5.5%; }
 .auth-road-lights { clip-path: ellipse(44.5% 43.2% at 50% 48.7%); }
 
-/* Debug alignment guide removed; the calibrated clipping mask remains active. */
-.auth-logo-artwork::after { display: none; }
 
 /* Replacement central pin, aligned to the pin embedded in the source artwork. */
 .auth-logo-artwork > .auth-logo-main-pin {
@@ -208,34 +181,7 @@
   background: linear-gradient(to bottom, transparent 0%, #ff50cb 24%, #be6aff 58%, #5bd9ff 100%);
 }
 
-/* Temporary signal anchors: cyan is the wordmark origin, pink is the pin target. */
-.auth-signal-anchor {
-  position: absolute;
-  z-index: 6;
-  width: 12px;
-  height: 12px;
-  box-sizing: border-box;
-  border: 1px solid #fff;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-.auth-signal-anchor-start {
-  left: 51%;
-  top: 70%;
-  background: #4bd8ff;
-  box-shadow: 0 0 0 2px #071126, 0 0 11px #4bd8ff;
-}
-.auth-signal-anchor-end {
-  left: 49.5%;
-  top: 42%;
-  background: #ff4dc8;
-  box-shadow: 0 0 0 2px #20071b, 0 0 11px #ff4dc8;
-}
-
 /* Calibrated signal endpoints. */
-.auth-signal-anchor-start { left: 61%; top: 62%; }
-.auth-signal-anchor-end { left: 50%; top: 56%; }
 .auth-chat-impulse-outgoing { left: 61%; top: 62%; }
 .auth-chat-impulse-returning { left: 50%; top: 56%; }
 @keyframes auth-message-outgoing {
@@ -252,12 +198,11 @@
 }
 
 /* SVG data packets follow one precise straight vector between the calibrated endpoints. */
-.auth-chat-impulse,
-.auth-signal-anchor { display: none; }
+.auth-chat-impulse { display: none; }
 .auth-signal-network {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 1;
   width: 100%;
   height: 100%;
   overflow: visible;
@@ -320,9 +265,6 @@
   bottom: 14%;
   left: 49%;
 }
-
-/* Temporary signal anchors enabled for position calibration. */
-.auth-signal-anchor { display: block; }
 
 /* Updated calibrated wordmark placement. */
 .auth-logo-artwork > .auth-logo-wordmark {
@@ -571,41 +513,45 @@
   }
 }
 
-/* Mobile login is a single viewport scene: no artificial space or page scroll below the form. */
-@media (max-width: 700px) {
+/* Balance the logo, form, and surrounding space across the mobile viewport. */
+@media (max-width: 700px) and (orientation: portrait) {
   .auth-landing {
     position: relative;
-    display: block;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(22px, 5dvh, 48px);
     min-height: 100dvh;
     height: 100dvh;
     overflow: hidden;
-    padding: 0;
+    padding: clamp(18px, 4dvh, 36px) 14px;
   }
   .auth-intro {
-    position: absolute;
-    inset: 0;
-    display: block;
+    position: relative;
+    inset: auto;
+    display: grid;
+    place-items: center;
     width: 100%;
+    height: 100%;
+    min-height: 0;
   }
   .auth-logo {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    width: min(100vw, 560px);
-    height: auto;
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    height: min(100%, 52dvh, 560px);
+    max-width: 100%;
     aspect-ratio: 1;
-    transform: translateX(-50%) !important;
+    transform: none !important;
   }
   .auth-panel {
-    position: absolute;
+    position: relative;
     z-index: 4;
-    top: auto;
-    right: auto;
-    bottom: 12px;
-    left: 50%;
+    inset: auto;
     width: min(376px, calc(100% - 28px));
     margin: 0;
-    transform: translateX(-50%) !important;
+    transform: none !important;
   }
 }
 

@@ -18,6 +18,7 @@ export interface ChatClientEvents {
 }
 
 export interface ChatServerEvents {
+  "map:refresh": () => void;
   "chat:message": (data: { conversationId: string; message: ChatMessage }) => void;
   "notification:friend-request": (data: {
     requestId: string;

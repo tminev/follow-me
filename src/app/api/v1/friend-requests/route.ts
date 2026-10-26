@@ -17,6 +17,8 @@ export async function POST(request: Request) {
     const senderId = await requireUserId();
     const input = schema.parse(await request.json());
     if (senderId === input.recipientId) return fail("SELF_REQUEST", "Не можете да поканите себе си.", 400);
+    const recipient = await db.user.findUnique({ where: { id: input.recipientId }, select: { id: true } });
+    if (!recipient) return fail("USER_NOT_FOUND", "Този профил вече не е наличен.", 404);
     if (await areBlocked(senderId, input.recipientId)) return fail("BLOCKED", "Контактът не е разрешен.", 403);
     if (await areFriends(senderId, input.recipientId)) return fail("ALREADY_FRIENDS", "Вече сте приятели.", 409);
     const reverse = await db.friendRequest.findFirst({ where: { senderId: input.recipientId, receiverId: senderId, status: "PENDING" } });

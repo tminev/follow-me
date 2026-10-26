@@ -1,5 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
+import { createPortal } from "react-dom";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { PushNotifications } from "@/components/PushNotifications";
@@ -8,7 +9,7 @@ import type { MapMarker } from "@/components/MapCanvas";
 import type { ChatClientEvents, ChatMessage, ChatServerEvents } from "@/lib/chat-socket";
 import { parseProfileVisibility } from "@/lib/profile-visibility";
 const MapCanvas = dynamic(() => import("@/components/MapCanvas"), { ssr: false, loading: () => <div className="map-loading">Зареждане на картата…</div> });
-type ProfileData = { displayName: string; bio?: string | null; city?: string | null; neighborhood?: string | null; avatarUrl?: string | null; heightCm?: number | null; hairColor?: string | null; interestsText?: string | null; lookingFor?: string | null; favoriteMovie?: string | null; favoriteBook?: string | null; occupation?: string | null; education?: string | null; languages?: string | null; weekendStyle?: string | null; firstDateIdea?: string | null; profileVisibility?: string | null }; type Me = { id: string; handle: string; declaredAdult: boolean; ageVerificationStatus: string; profile: ProfileData }; type Person = { id: string; handle: string; isLocationVisible?: boolean; profile: ProfileData }; type RequestItem = { id: string; status: string; sender?: Person; receiver?: Person }; type Conversation = { id: string; person: Person; lastMessage?: { body: string } };
+type ProfileData = { displayName: string; bio?: string | null; city?: string | null; neighborhood?: string | null; avatarUrl?: string | null; heightCm?: number | null; hairColor?: string | null; interestsText?: string | null; lookingFor?: string | null; favoriteMovie?: string | null; favoriteBook?: string | null; occupation?: string | null; education?: string | null; languages?: string | null; weekendStyle?: string | null; firstDateIdea?: string | null; profileVisibility?: string | null }; type Me = { id: string; handle: string; declaredAdult: boolean; ageVerificationStatus: string; profile: ProfileData }; type Person = { id: string; handle: string; isLocationVisible?: boolean; lastActiveAt?: string | null; profile: ProfileData }; type RequestItem = { id: string; status: string; sender?: Person; receiver?: Person }; type Conversation = { id: string; person: Person; lastMessage?: { body: string } };
 type ChatAlert = { id: string; sender: { handle: string; displayName: string }; body: string };
 async function api(path: string, init?: RequestInit) { const r = await fetch(`/api/v1${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }); const text = await r.text(); let data: unknown; try { data = text ? JSON.parse(text) : {} } catch { throw new Error(r.status === 502 ? "Връзката към локалния сървър е прекъсната. Рестартирай тунела и опитай отново." : "Сървърът върна невалиден отговор.") } if (!r.ok) throw new Error(typeof data === "object" && data !== null && "message" in data ? String(data.message) : "Грешка"); return data }
 export default function Home() {
@@ -62,8 +63,7 @@ export default function Home() {
     </section>
     {profileOpen && <div className="profile-modal-backdrop" role="presentation" onMouseDown={() => setProfileOpen(false)}>
       <section className="profile-modal" role="dialog" aria-modal="true" aria-label="Твоят профил" onMouseDown={(event) => event.stopPropagation()}>
-        <button type="button" className="modal-close" aria-label="Затвори профила" title="Затвори" onPointerDown={(event) => event.stopPropagation()} onClick={() => setProfileOpen(false)}>×</button>
-        <Profile me={me} reload={refresh} notify={setNotice} />
+        <Profile me={me} reload={refresh} notify={setNotice} onClose={() => setProfileOpen(false)} />
       </section>
     </div>}
   </main>;
@@ -233,6 +233,7 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
   const [people, setPeople] = useState<Person[]>([]);
   const [cityQuery, setCityQuery] = useState("");
   const [audience, setAudience] = useState<"all" | "friends" | "others">("all");
+  const [sortBy, setSortBy] = useState<"distance" | "interests" | "activity">("distance");
   const [friendIds, setFriendIds] = useState<string[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [invitesOpen, setInvitesOpen] = useState(false);
@@ -243,11 +244,32 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
   const [drawerHandleY, setDrawerHandleY] = useState(220);
   const drawerHandleMoved = useRef(false);
   const [ownPosition, setOwnPosition] = useState<{ latitude: number; longitude: number }>();
+  const interestTerms = (value?: string | null) => new Set((value ?? "").toLocaleLowerCase("bg").split(/[;,|\n]+/).map((item) => item.trim()).filter(Boolean));
+  const ownInterests = interestTerms(me.profile.interestsText);
+  const distanceToPerson = (person: Person) => {
+    const marker = nearby.find((item) => item.id === person.id);
+    if (!ownPosition || !marker) return Number.POSITIVE_INFINITY;
+    const earthRadius = 6_371_000;
+    const radians = (value: number) => value * Math.PI / 180;
+    const latitude = radians(marker.latitude - ownPosition.latitude);
+    const longitude = radians(marker.longitude - ownPosition.longitude);
+    const value = Math.sin(latitude / 2) ** 2 + Math.cos(radians(ownPosition.latitude)) * Math.cos(radians(marker.latitude)) * Math.sin(longitude / 2) ** 2;
+    return earthRadius * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+  };
+  const sharedInterestCount = (person: Person) => [...interestTerms(person.profile.interestsText)].filter((item) => ownInterests.has(item)).length;
   const proximityState = useRef(new Map<string, boolean>());
   const lastLocationSent = useRef<{ latitude: number; longitude: number; sentAt: number }>();
   const load = async () => { const next = await api("/visibility/me"); setState(next); if (next.visible) { const result = await api("/discovery/nearby") as { users: MapMarker[]; radiusMeters: number; loyaltyLabel: string }; setNearby(result.users); setDiscoveryRadius({ meters: result.radiusMeters, loyaltyLabel: result.loyaltyLabel }); } else { setNearby([]); setDiscoveryRadius(undefined); } };
   useEffect(() => { Promise.all([load(), api("/discover/users").then((result) => setPeople(result.users)), api("/friends").then((result) => setFriendIds(result.friends.map((person: Person) => person.id))), api("/friend-requests?direction=incoming").then((result) => setRequests(result.requests))]).catch((error) => notify((error as Error).message)) }, []);
   useEffect(() => { const timer = window.setInterval(() => { Promise.all([load(), api("/discover/users").then((result) => setPeople(result.users))]).catch((error) => notify((error as Error).message)) }, 15000); return () => window.clearInterval(timer) }, []);
+  useEffect(() => {
+    const client = io() as Socket<ChatServerEvents, ChatClientEvents>;
+    const refreshMap = () => {
+      void load().catch((error: unknown) => notify((error as Error).message));
+    };
+    client.on("map:refresh", refreshMap);
+    return () => client.disconnect();
+  }, []);
   useEffect(() => {
     if (!state?.visible || !navigator.geolocation) { lastLocationSent.current = undefined; return; }
     const distanceInMeters = (first: { latitude: number; longitude: number }, second: { latitude: number; longitude: number }) => {
@@ -295,7 +317,15 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
     }
     for (const id of proximityState.current.keys()) if (!activeIds.has(id)) proximityState.current.delete(id);
   }, [nearby, notify, ownPosition, state?.visible]);  const unreadHandles = new Set(chatAlerts.map((alert) => alert.sender.handle));
-  const filteredPeople = people.filter((person) => audience === "all" || (audience === "friends" ? friendIds.includes(person.id) : !friendIds.includes(person.id))).sort((first, second) => Number(unreadHandles.has(second.handle)) - Number(unreadHandles.has(first.handle)));
+  const filteredPeople = people
+    .filter((person) => audience === "all" || (audience === "friends" ? friendIds.includes(person.id) : !friendIds.includes(person.id)))
+    .sort((first, second) => {
+      const unreadOrder = Number(unreadHandles.has(second.handle)) - Number(unreadHandles.has(first.handle));
+      if (unreadOrder) return unreadOrder;
+      if (sortBy === "distance") return distanceToPerson(first) - distanceToPerson(second);
+      if (sortBy === "interests") return sharedInterestCount(second) - sharedInterestCount(first) || first.profile.displayName.localeCompare(second.profile.displayName, "bg");
+      return (Date.parse(second.lastActiveAt ?? "") || 0) - (Date.parse(first.lastActiveAt ?? "") || 0);
+    });
   const cities = filteredPeople.reduce<Record<string, Person[]>>((groups, person) => { const city = person.profile.city?.trim() || "Без посочен град"; (groups[city] ??= []).push(person); return groups }, {});
   const visibleCities = Object.entries(cities).filter(([city]) => city.toLocaleLowerCase("bg").includes(cityQuery.trim().toLocaleLowerCase("bg"))).sort(([a], [b]) => a.localeCompare(b, "bg"));
   async function start(continuous = false) {
@@ -337,8 +367,8 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
   function moveDrawerHandle(event: React.PointerEvent<HTMLButtonElement>) { if (!window.matchMedia("(max-width: 800px)").matches) return; event.preventDefault(); const startY = event.clientY; const startTop = drawerHandleY; drawerHandleMoved.current = false; const move = (next: PointerEvent) => { const delta = next.clientY - startY; if (Math.abs(delta) > 4) drawerHandleMoved.current = true; setDrawerHandleY(Math.max(92, Math.min(window.innerHeight - 92, startTop + delta))) }; const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.setTimeout(() => { drawerHandleMoved.current = false }, 0) }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", end) }
   return <Panel title="Карта и хора" subtitle="Виж хора по градове; картата се отваря само при доброволно споделена локация.">
     <div className="map-directory">
-      <div className={`map-card ${selectedFriendId ? "showing-chat" : ""}`}><button className="mobile-directory-handle" style={{ top: drawerHandleY }} onPointerDown={moveDrawerHandle} onClick={() => { if (!drawerHandleMoved.current) setDirectoryOpen(true) }} aria-label="Отвори хора и известия"><b>☰</b></button>{selectedFriendId ? <Chats meId={me.id} openPersonId={selectedFriendId} embedded onBack={() => setSelectedFriendId(undefined)} onBlock={() => { const person = people.find((item) => item.id === selectedFriendId); if (person && window.confirm(`Сигурен ли си, че искаш да блокираш ${person.profile.displayName}?`)) void block(person) }} /> : state?.visible ? <><MapCanvas people={nearby} ownPosition={ownPosition} radiusMeters={discoveryRadius?.meters} onPersonClick={(person) => { if (person.profile) setSelectedPublicProfile({ id: person.id, handle: person.handle, profile: person.profile }); }} /><div className="map-radius" aria-live="polite"><b>Радиус на виждане</b><span>{discoveryRadius ? `${discoveryRadius.meters >= 1000 ? `${discoveryRadius.meters / 1000} км` : `${discoveryRadius.meters} м`} · ${discoveryRadius.loyaltyLabel}` : "Зареждане…"}</span></div><p>{state.session?.continuous ? (nearby.length > 0 ? "Видим си постоянно. Маркерите показват споделените позиции в твоя радиус." : "Видим си постоянно. В момента няма други хора с включена видимост в твоя радиус.") : (nearby.length > 0 ? "Видим си за ограничен срок. Маркерите показват споделените позиции в твоя радиус." : "Видим си за ограничен срок. В момента няма други хора с включена видимост в твоя радиус.")}</p><button className="danger" onClick={stop}>Спри веднага</button></> : <><div className="map-orbit"><span>●</span><b>СКРИТ СЪМ</b></div><p>{me.declaredAdult ? "Картата не се зарежда, докато не включиш доброволно видимост. Сесията изтича автоматично." : "Картата е достъпна само за профили, които са декларирали 18+ и са посочили пълнолетна възраст."}</p><div className="map-visibility-actions"><button className="primary" onClick={() => start()}>Включи за 15 мин.</button><button className="primary" onClick={() => start(true)}>Видим постоянно</button></div></>}</div>
-      {directoryOpen && <button className="directory-backdrop" onClick={() => setDirectoryOpen(false)} aria-label="Затвори панела" />}<aside className={`city-directory ${directoryOpen ? "open" : ""}`}><button className="directory-close" onClick={() => setDirectoryOpen(false)} aria-label="Затвори списъка">×</button><div className="city-status-bar"><div className={`city-invites ${invitesOpen ? "open" : ""}`}><button className="invites-toggle" onClick={() => setInvitesOpen((open) => !open)} aria-expanded={invitesOpen}><span>Покани</span><b>{requests.length}</b></button><div className={`invites-list ${invitesOpen ? "open" : ""}`}>{requests.length > 0 ? requests.map((request) => { const sender = request.sender; const profile = sender?.profile; if (!sender || !profile) return null; return <button type="button" className="invite-summary" key={request.id} onClick={() => setSelectedInvite(request)}>{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span className="invite-avatar">{profile.displayName.slice(0, 1).toUpperCase()}</span>}<span className="invite-summary-copy"><b>{profile.displayName}</b><small>{[profile.city, profile.neighborhood].filter(Boolean).join(" · ") || "Градът не е посочен"}</small>{profile.lookingFor && <em>{profile.lookingFor}</em>}</span><i aria-hidden="true">›</i></button> }) : <small className="invites-empty">Няма нови покани.</small>}</div></div></div><div className="audience-filter" aria-label="Филтър хора"><button className={audience === "friends" ? "active" : ""} aria-pressed={audience === "friends"} onClick={() => setAudience(audience === "friends" ? "all" : "friends")}>Приятели</button><button className={audience === "others" ? "active" : ""} aria-pressed={audience === "others"} onClick={() => setAudience(audience === "others" ? "all" : "others")}>Останали</button></div><input className="city-search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} placeholder="Търси град, например София" aria-label="Търси град" />{visibleCities.map(([city, cityPeople]) => <section key={city} className="city-group">{cityPeople.map((person) => { const isFriend = friendIds.includes(person.id); return <button key={person.id} className={`city-person ${selectedFriendId === person.id ? "selected" : ""}`} title={isFriend ? "Отвори чат" : "Изпрати покана"} onClick={async () => { if (isFriend) { const nextSelected = selectedFriendId === person.id ? undefined : person.id; setSelectedFriendId(nextSelected); if (nextSelected) { setDirectoryOpen(false); onReadMessages(person.handle); } return } setSelectedPublicProfile(person); setDirectoryOpen(false) }}><span>{person.profile.displayName.slice(0, 1).toUpperCase()}</span><div><b>{person.profile.displayName}{unreadHandles.has(person.handle) && <span className="city-message-badge" role="img" aria-label="Ново съобщение" title="Ново съобщение" />}{person.isLocationVisible && <svg className="location-live" viewBox="0 0 24 24" role="img" aria-label="Споделя локация"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z" /></svg>}</b></div><span className="city-person-action" aria-hidden="true">{isFriend ? <svg viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-4.6 4.1c-.65.57-1.65.11-1.65-.76V15.1A3.5 3.5 0 0 1 4 11.5v-6ZM8 8h8M8 11h5" /></svg> : <svg viewBox="0 0 24 24"><path d="M15 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20m6.5-9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19 8v6m-3-3h6" /></svg>}</span></button> })}</section>)}{visibleCities.length === 0 && <p className="city-empty">Няма намерени хора според избрания филтър.</p>}</aside>
+<div className={`map-card ${selectedFriendId ? "showing-chat" : ""}`}><button className="mobile-directory-handle" style={{ top: drawerHandleY }} onPointerDown={moveDrawerHandle} onClick={() => { if (!drawerHandleMoved.current) setDirectoryOpen(true) }} aria-label="Отвори хора и известия"><b>☰</b></button>{selectedFriendId ? <Chats meId={me.id} openPersonId={selectedFriendId} embedded onBack={() => setSelectedFriendId(undefined)} onBlock={() => { const person = people.find((item) => item.id === selectedFriendId); if (person && window.confirm(`Сигурен ли си, че искаш да блокираш ${person.profile.displayName}?`)) void block(person) }} /> : state?.visible ? <><MapCanvas people={nearby} ownPosition={ownPosition} radiusMeters={discoveryRadius?.meters} onPersonClick={(person) => { if (person.profile) setSelectedPublicProfile({ id: person.id, handle: person.handle, profile: person.profile }); }} /><div className="map-radius" aria-live="polite"><b>Радиус на виждане</b><span>{discoveryRadius ? `${discoveryRadius.meters >= 1000 ? `${discoveryRadius.meters / 1000} км` : `${discoveryRadius.meters} м`} · ${discoveryRadius.loyaltyLabel}` : "Зареждане…"}</span></div><p>{state.session?.continuous ? (nearby.length > 0 ? "Видим си постоянно. Маркерите показват споделените позиции в твоя радиус." : "Видим си постоянно. В момента няма други хора с включена видимост в твоя радиус.") : (nearby.length > 0 ? "Видим си за ограничен срок. Маркерите показват споделените позиции в твоя радиус." : "Видим си за ограничен срок. В момента няма други хора с включена видимост в твоя радиус.")}</p><button className="danger" onClick={stop}>Спри веднага</button></> : <><div className="map-hidden-brand"><img src="/follow-me-logo.png" alt="Follow Me" /><b>СКРИТ СЪМ</b></div><p>{me.declaredAdult ? "Картата не се зарежда, докато не включиш доброволно видимост. Сесията изтича автоматично." : "Картата е достъпна само за профили, които са декларирали 18+ и са посочили пълнолетна възраст."}</p><div className="map-visibility-actions"><button className="primary" onClick={() => start()}>Включи за 15 мин.</button><button className="primary" onClick={() => start(true)}>Видим постоянно</button></div></>}</div>
+      {directoryOpen && <button className="directory-backdrop" onClick={() => setDirectoryOpen(false)} aria-label="Затвори панела" />}<aside className={`city-directory ${directoryOpen ? "open" : ""}`}><button className="directory-close" onClick={() => setDirectoryOpen(false)} aria-label="Затвори списъка">×</button><div className="city-status-bar"><div className={`city-invites ${invitesOpen ? "open" : ""}`}><button className="invites-toggle" onClick={() => setInvitesOpen((open) => !open)} aria-expanded={invitesOpen}><span>Покани</span><b>{requests.length}</b></button><div className={`invites-list ${invitesOpen ? "open" : ""}`}>{requests.length > 0 ? requests.map((request) => { const sender = request.sender; const profile = sender?.profile; if (!sender || !profile) return null; return <button type="button" className="invite-summary" key={request.id} onClick={() => setSelectedInvite(request)}>{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span className="invite-avatar">{profile.displayName.slice(0, 1).toUpperCase()}</span>}<span className="invite-summary-copy"><b>{profile.displayName}</b><small>{[profile.city, profile.neighborhood].filter(Boolean).join(" · ") || "Градът не е посочен"}</small>{profile.lookingFor && <em>{profile.lookingFor}</em>}</span><i aria-hidden="true">›</i></button> }) : <small className="invites-empty">Няма нови покани.</small>}</div></div></div>{visibleCities.map(([city, cityPeople]) => <section key={city} className="city-group">{cityPeople.map((person) => { const isFriend = friendIds.includes(person.id); return <button key={person.id} className={`city-person ${selectedFriendId === person.id ? "selected" : ""}`} title={isFriend ? "Отвори чат" : "Изпрати покана"} onClick={async () => { if (isFriend) { const nextSelected = selectedFriendId === person.id ? undefined : person.id; setSelectedFriendId(nextSelected); if (nextSelected) { setDirectoryOpen(false); onReadMessages(person.handle); } return } setSelectedPublicProfile(person); setDirectoryOpen(false) }}><span>{person.profile.displayName.slice(0, 1).toUpperCase()}</span><div><b>{person.profile.displayName}{unreadHandles.has(person.handle) && <span className="city-message-badge" role="img" aria-label="Ново съобщение" title="Ново съобщение" />}{person.isLocationVisible && <svg className="location-live" viewBox="0 0 24 24" role="img" aria-label="Споделя локация"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z" /></svg>}</b></div><span className="city-person-action" aria-hidden="true">{isFriend ? <svg viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-4.6 4.1c-.65.57-1.65.11-1.65-.76V15.1A3.5 3.5 0 0 1 4 11.5v-6ZM8 8h8M8 11h5" /></svg> : <svg viewBox="0 0 24 24"><path d="M15 20v-1.5a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V20m6.5-9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19 8v6m-3-3h6" /></svg>}</span></button> })}</section>)}{visibleCities.length === 0 && <p className="city-empty">Няма намерени хора според избрания филтър.</p>}<div className="audience-filter" aria-label="Филтър хора"><button className={audience === "friends" ? "active" : ""} aria-pressed={audience === "friends"} onClick={() => setAudience(audience === "friends" ? "all" : "friends")}>Приятели</button><button className={audience === "others" ? "active" : ""} aria-pressed={audience === "others"} onClick={() => setAudience(audience === "others" ? "all" : "others")}>Останали</button></div><input className="city-search" value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} placeholder="Търси град, например София" aria-label="Търси град" /><div className="directory-sort" role="group" aria-label={"\u041f\u043e\u0434\u0440\u0435\u0434\u0438 \u0445\u043e\u0440\u0430\u0442\u0430"}><button type="button" className={sortBy === "distance" ? "active" : ""} onClick={() => setSortBy("distance")}>{"\u0411\u043b\u0438\u0437\u043e\u0441\u0442"}</button><button type="button" className={sortBy === "interests" ? "active" : ""} onClick={() => setSortBy("interests")}>{"\u041e\u0431\u0449\u0438 \u0438\u043d\u0442\u0435\u0440\u0435\u0441\u0438"}</button><button type="button" className={sortBy === "activity" ? "active" : ""} onClick={() => setSortBy("activity")}>{"\u0410\u043a\u0442\u0438\u0432\u043d\u043e\u0441\u0442"}</button></div></aside>
     </div>
     {selectedInvite?.sender && <InvitationPreview request={selectedInvite} onClose={() => setSelectedInvite(undefined)} onRespond={async (action) => { await respondToRequest(selectedInvite, action); setSelectedInvite(undefined); }} />}    {selectedPublicProfile && <PublicProfilePreview person={selectedPublicProfile} onClose={() => setSelectedPublicProfile(undefined)} onSend={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: selectedPublicProfile.id }) }); notify("Поканата е изпратена."); setSelectedPublicProfile(undefined); } catch (error) { notify((error as Error).message); } }} onHideFromMap={async () => { if (!window.confirm(`Сигурен ли си, че искаш ${selectedPublicProfile.profile.displayName} да не вижда местоположението ти на картата?`)) return; try { await api(`/users/${selectedPublicProfile.id}/hide`, { method: "POST" }); setNearby((items) => items.filter((item) => item.id !== selectedPublicProfile.id)); notify("Вече си скрит от този човек на картата."); } catch (error) { notify((error as Error).message); } }} />}
   </Panel>
@@ -356,7 +386,130 @@ function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { pers
 }function VisibilityToggle({ name, value }: { name: string; value: "PUBLIC" | "FRIENDS" }) {
   const [friendsOnly, setFriendsOnly] = useState(value === "FRIENDS");
   return <label className={`visibility-switch ${friendsOnly ? "friends" : "public"}`}><input type="checkbox" checked={friendsOnly} onChange={(event) => setFriendsOnly(event.target.checked)} aria-label="Видимост: публично или само приятели" /><input type="hidden" name={name} value={friendsOnly ? "FRIENDS" : "PUBLIC"} /><span className="visibility-switch-track" aria-hidden="true"><i /></span><b>{friendsOnly ? "Само приятели" : "Публично"}</b></label>;
-}function Profile({ me, reload, notify }: { me: Me; reload: () => void; notify: (x: string) => void }) {
+}const lookingForOptions = ["", "Сериозна връзка", "Опознаване", "Приключение", "Приятелство", "Игра и общи хобита"];
+function ProfileDropdown({ value: initialValue }: { value: string }) {
+  const [value, setValue] = useState(initialValue);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, lookingForOptions.indexOf(initialValue)));
+  const [position, setPosition] = useState<React.CSSProperties>();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const selectedIndex = Math.max(0, lookingForOptions.indexOf(value));
+  const selectedLabel = value || "Не е посочено";
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const bounds = trigger.getBoundingClientRect();
+    const margin = 12;
+    const gap = 6;
+    const desiredHeight = Math.min(240, window.innerHeight - margin * 2);
+    const below = window.innerHeight - bounds.bottom - margin - gap;
+    const above = bounds.top - margin - gap;
+    const placeAbove = below < desiredHeight && above > below;
+    const maxHeight = Math.max(0, Math.min(desiredHeight, placeAbove ? above : below));
+    const width = Math.min(bounds.width, window.innerWidth - margin * 2);
+    const left = Math.max(margin, Math.min(bounds.left, window.innerWidth - margin - width));
+    const top = Math.max(
+      margin,
+      Math.min(window.innerHeight - margin - maxHeight, placeAbove ? bounds.top - gap - maxHeight : bounds.bottom + gap),
+    );
+    setPosition({ position: "fixed", left, top, width, maxHeight });
+  }, []);
+
+  function showMenu() {
+    setActiveIndex(selectedIndex);
+    updatePosition();
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const reposition = () => updatePosition();
+    document.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    window.visualViewport?.addEventListener("resize", reposition);
+    window.visualViewport?.addEventListener("scroll", reposition);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+      window.visualViewport?.removeEventListener("resize", reposition);
+      window.visualViewport?.removeEventListener("scroll", reposition);
+    };
+  }, [open, updatePosition]);
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) showMenu();
+      else setActiveIndex((index) => (index + (event.key === "ArrowDown" ? 1 : -1) + lookingForOptions.length) % lookingForOptions.length);
+    } else if (event.key === "Escape" && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+    } else if (event.key === "Enter" || event.key === " ") {
+      if (!open) {
+        event.preventDefault();
+        showMenu();
+      } else {
+        event.preventDefault();
+        setValue(lookingForOptions[activeIndex]);
+        setOpen(false);
+      }
+    } else if (event.key === "Home" && open) {
+      event.preventDefault();
+      setActiveIndex(0);
+    } else if (event.key === "End" && open) {
+      event.preventDefault();
+      setActiveIndex(lookingForOptions.length - 1);
+    }
+  }
+
+  return <>
+    <input type="hidden" name="lookingFor" value={value} />
+    <button
+      ref={triggerRef}
+      type="button"
+      id="profile-lookingFor"
+      className="profile-dropdown-trigger"
+      role="combobox"
+      aria-label="Намерения"
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      aria-controls="profile-lookingFor-options"
+      aria-activedescendant={open ? `profile-lookingFor-option-${activeIndex}` : undefined}
+      onClick={() => open ? setOpen(false) : showMenu()}
+      onKeyDown={handleKeyDown}
+    >
+      <span>{selectedLabel}</span><span className={`profile-dropdown-chevron${open ? " open" : ""}`} aria-hidden="true">⌄</span>
+    </button>
+    {open && position && createPortal(
+      <div ref={menuRef} id="profile-lookingFor-options" className="profile-dropdown-menu" role="listbox" aria-label="Намерения" style={position}>
+        {lookingForOptions.map((option, index) => (
+          <div
+            key={option || "unspecified"}
+            id={`profile-lookingFor-option-${index}`}
+            className={`profile-dropdown-option${index === selectedIndex ? " selected" : ""}${index === activeIndex ? " active" : ""}`}
+            role="option"
+            aria-selected={index === selectedIndex}
+            onMouseEnter={() => setActiveIndex(index)}
+            onClick={() => { setValue(option); setOpen(false); triggerRef.current?.focus(); }}
+          >{option || "Не е посочено"}</div>
+        ))}
+      </div>,
+      document.body,
+    )}
+  </>;
+}
+function Profile({ me, reload, notify, onClose }: { me: Me; reload: () => void; notify: (x: string) => void; onClose: () => void }) {
   const [avatarUrl, setAvatarUrl] = useState(me.profile.avatarUrl ?? "");
   const [saving, setSaving] = useState(false);
   const visibility = parseProfileVisibility(me.profile.profileVisibility);
@@ -430,15 +583,15 @@ function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { pers
       notify((error as Error).message);
     } finally { setSaving(false); }
   }
-  return <Panel title="Твоят профил" subtitle={`@${me.handle}`}><form className="profile-form profile-details-form" onSubmit={save}>
-    <section className="profile-photo-row"><div className="profile-photo-preview">{avatarUrl ? <img src={avatarUrl} alt="Твоя профилна снимка" /> : <span>{me.profile.displayName.slice(0, 1).toUpperCase()}</span>}<label className="profile-photo-change" title="Избери снимка" aria-label="Избери профилна снимка"><input className="profile-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={choosePhoto} /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Zm16.7-9.7a1 1 0 0 0 0-1.4l-2.1-2.1a1 1 0 0 0-1.4 0l-1.6 1.6L19.1 8l1.6-1.5Z" /></svg></label></div><div><b>Профилна снимка</b><small>JPG, PNG, WebP или GIF до 10 MB.</small><div className="profile-inline-visibility"><span>Видимост</span><VisibilityToggle name="visibilityPhoto" value={visibility.photo} /></div>{avatarUrl && <button type="button" className="link profile-photo-remove" onClick={() => setAvatarUrl("")}>Премахни снимката</button>}</div></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Местоположение</h3><VisibilityToggle name="visibilityLocation" value={visibility.location} /></div><div className="profile-fields two-columns"><label>Град<input name="city" defaultValue={me.profile.city ?? ""} /></label><label>Квартал<input name="neighborhood" defaultValue={me.profile.neighborhood ?? ""} placeholder="Например Лозенец" /></label></div></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Външен вид</h3><VisibilityToggle name="visibilityAppearance" value={visibility.appearance} /></div><div className="profile-fields two-columns"><label>Ръст (см)<input name="heightCm" type="number" min="120" max="240" defaultValue={me.profile.heightCm ?? ""} /></label><label>Цвят на косата<input name="hairColor" defaultValue={me.profile.hairColor ?? ""} placeholder="Например кестенява" /></label></div></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>За мен</h3><VisibilityToggle name="visibilityAbout" value={visibility.about} /></div><label>Име<input name="displayName" defaultValue={me.profile.displayName} required /></label><label>Описание<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="bio" maxLength={500} defaultValue={me.profile.bio ?? ""} placeholder="Няколко думи за теб…" /></label></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Какво търся</h3><VisibilityToggle name="visibilityIntentions" value={visibility.intentions} /></div><label>Намерения<select name="lookingFor" defaultValue={me.profile.lookingFor ?? ""}><option value="">Не е посочено</option><option>Сериозна връзка</option><option>Опознаване</option><option>Приключение</option><option>Приятелство</option><option>Игра и общи хобита</option></select></label></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Интереси</h3><VisibilityToggle name="visibilityInterests" value={visibility.interests} /></div><label>Интереси<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="interestsText" defaultValue={me.profile.interestsText ?? ""} placeholder="Пътувания, фитнес, настолни игри…" /></label></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Любими филм и книга</h3><VisibilityToggle name="visibilityFavorites" value={visibility.favorites} /></div><div className="profile-fields two-columns"><label>Любим филм<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteMovie" defaultValue={me.profile.favoriteMovie ?? ""} /></label><label>Любима книга<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteBook" defaultValue={me.profile.favoriteBook ?? ""} /></label></div></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Още за мен</h3><VisibilityToggle name="visibilityProfessional" value={visibility.professional} /></div><div className="profile-fields two-columns"><label>Работа / занимание<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="occupation" defaultValue={me.profile.occupation ?? ""} /></label><label>Образование<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="education" defaultValue={me.profile.education ?? ""} /></label><label className="profile-wide">Езици<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="languages" defaultValue={me.profile.languages ?? ""} placeholder="Български, английски…" /></label></div></section>
-    <section className="profile-section"><div className="profile-category-title"><h3>Уикенд и първа среща</h3><VisibilityToggle name="visibilityLifestyle" value={visibility.lifestyle} /></div><div className="profile-fields two-columns"><label>Моят идеален уикенд<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="weekendStyle" defaultValue={me.profile.weekendStyle ?? ""} placeholder="Планина, кино, разходка…" /></label><label>Идея за първа среща<textarea className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="firstDateIdea" defaultValue={me.profile.firstDateIdea ?? ""} placeholder="Кафе, музей, игра…" /></label></div></section>    <button className="primary" disabled={saving}>{saving ? "Запазване…" : "Запази профила"}</button>
-  </form></Panel>;
+  return <form className="profile-form profile-details-form" onSubmit={save}>
+    <section className="profile-photo-row"><div className="profile-photo-preview">{avatarUrl ? <img src={avatarUrl} alt="Твоя профилна снимка" /> : <span>{me.profile.displayName.slice(0, 1).toUpperCase()}</span>}<label className="profile-photo-change" title="Избери снимка" aria-label="Избери профилна снимка"><input className="profile-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={choosePhoto} /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Zm16.7-9.7a1 1 0 0 0 0-1.4l-2.1-2.1a1 1 0 0 0-1.4 0l-1.6 1.6L19.1 8l1.6-1.5Z" /></svg></label></div><div className="profile-photo-info"><div className="profile-photo-info-head"><b>Снимка</b><button type="button" className="modal-close" style={{ position: "static", flex: "0 0 32px", width: 32, height: 32, fontSize: 23 }} aria-label="Затвори профила" title="Затвори" onPointerDown={(event) => event.stopPropagation()} onClick={onClose}>×</button></div><small>JPG · PNG · WebP · GIF · до 10 MB</small><VisibilityToggle name="visibilityPhoto" value={visibility.photo} />{avatarUrl && <button type="button" className="link profile-photo-remove" onClick={() => setAvatarUrl("")}>Премахни снимката</button>}</div></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Местоположение</h3><VisibilityToggle name="visibilityLocation" value={visibility.location} /></div><div className="profile-fields two-columns"><fieldset className="profile-floating-field"><legend><label htmlFor="profile-city">Град</label></legend><input id="profile-city" name="city" defaultValue={me.profile.city ?? ""} /></fieldset><fieldset className="profile-floating-field"><legend><label htmlFor="profile-neighborhood">Квартал</label></legend><input id="profile-neighborhood" name="neighborhood" defaultValue={me.profile.neighborhood ?? ""} placeholder="Например Лозенец" /></fieldset></div></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Външен вид</h3><VisibilityToggle name="visibilityAppearance" value={visibility.appearance} /></div><div className="profile-fields two-columns"><fieldset className="profile-floating-field"><legend><label htmlFor="profile-heightCm">Ръст (см)</label></legend><input id="profile-heightCm" name="heightCm" type="number" min="120" max="240" defaultValue={me.profile.heightCm ?? ""} /></fieldset><fieldset className="profile-floating-field"><legend><label htmlFor="profile-hairColor">Цвят на косата</label></legend><input id="profile-hairColor" name="hairColor" defaultValue={me.profile.hairColor ?? ""} placeholder="Например кестенява" /></fieldset></div></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>За мен</h3><VisibilityToggle name="visibilityAbout" value={visibility.about} /></div><fieldset className="profile-floating-field"><legend><label htmlFor="profile-displayName">Име</label></legend><input id="profile-displayName" name="displayName" defaultValue={me.profile.displayName} required /></fieldset><fieldset className="profile-floating-field"><legend><label htmlFor="profile-bio">Описание</label></legend><textarea id="profile-bio" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="bio" maxLength={500} defaultValue={me.profile.bio ?? ""} placeholder="Няколко думи за теб…" /></fieldset></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Какво търся</h3><VisibilityToggle name="visibilityIntentions" value={visibility.intentions} /></div><fieldset className="profile-floating-field"><legend><label htmlFor="profile-lookingFor">Намерения</label></legend><ProfileDropdown value={me.profile.lookingFor ?? ""} /></fieldset></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Интереси</h3><VisibilityToggle name="visibilityInterests" value={visibility.interests} /></div><fieldset className="profile-floating-field"><legend><label htmlFor="profile-interestsText">Интереси</label></legend><textarea id="profile-interestsText" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="interestsText" defaultValue={me.profile.interestsText ?? ""} placeholder="Пътувания, фитнес, настолни игри…" /></fieldset></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Любими филм и книга</h3><VisibilityToggle name="visibilityFavorites" value={visibility.favorites} /></div><div className="profile-fields two-columns"><fieldset className="profile-floating-field"><legend><label htmlFor="profile-favoriteMovie">Любим филм</label></legend><textarea id="profile-favoriteMovie" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteMovie" defaultValue={me.profile.favoriteMovie ?? ""} /></fieldset><fieldset className="profile-floating-field"><legend><label htmlFor="profile-favoriteBook">Любима книга</label></legend><textarea id="profile-favoriteBook" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="favoriteBook" defaultValue={me.profile.favoriteBook ?? ""} /></fieldset></div></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Още за мен</h3><VisibilityToggle name="visibilityProfessional" value={visibility.professional} /></div><div className="profile-fields two-columns"><fieldset className="profile-floating-field"><legend><label htmlFor="profile-occupation">Работа / занимание</label></legend><textarea id="profile-occupation" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="occupation" defaultValue={me.profile.occupation ?? ""} /></fieldset><fieldset className="profile-floating-field"><legend><label htmlFor="profile-education">Образование</label></legend><textarea id="profile-education" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="education" defaultValue={me.profile.education ?? ""} /></fieldset><fieldset className="profile-floating-field profile-wide"><legend><label htmlFor="profile-languages">Езици</label></legend><textarea id="profile-languages" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="languages" defaultValue={me.profile.languages ?? ""} placeholder="Български, английски…" /></fieldset></div></section>
+    <section className="profile-section"><div className="profile-category-title"><h3>Уикенд и първа среща</h3><VisibilityToggle name="visibilityLifestyle" value={visibility.lifestyle} /></div><div className="profile-fields two-columns"><fieldset className="profile-floating-field"><legend><label htmlFor="profile-weekendStyle">Моят идеален уикенд</label></legend><textarea id="profile-weekendStyle" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="weekendStyle" defaultValue={me.profile.weekendStyle ?? ""} placeholder="Планина, кино, разходка…" /></fieldset><fieldset className="profile-floating-field"><legend><label htmlFor="profile-firstDateIdea">Идея за първа среща</label></legend><textarea id="profile-firstDateIdea" className="profile-text-value" rows={1} onInput={autoResize} ref={resizeTextArea} name="firstDateIdea" defaultValue={me.profile.firstDateIdea ?? ""} placeholder="Кафе, музей, игра…" /></fieldset></div></section>    <button className="primary" disabled={saving}>{saving ? "Запазване…" : "Запази профила"}</button>
+  </form>;
 }function Panel({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) { return <><div className="section-head"><h1>{title}</h1><p>{subtitle}</p></div>{children}</> }; function Grid({ children }: { children: React.ReactNode }) { return <div className="grid">{children}</div> }; function PersonCard({ p, children }: { p: Person; children: React.ReactNode }) { return <article className="person"><div className="avatar">{p.profile.displayName[0]}</div><div><h3>{p.profile.displayName}</h3><small>@{p.handle}{p.profile.city ? ` · ${p.profile.city}` : ""}</small><p>{p.profile.bio ?? "Нов човек във Follow Me"}</p></div>{children}</article> }

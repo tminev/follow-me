@@ -1,4 +1,4 @@
-﻿import { db } from "@/lib/db";
+import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { apiError, ok } from "@/lib/http";
 import { activePresence } from "@/lib/presence";
@@ -28,12 +28,21 @@ export async function GET(request: Request) {
         endedAt: null,
         expiresAt: { gt: new Date() },
       },
-      select: { userId: true },
+      select: { userId: true, startedAt: true },
     });
-    const visibleUserIds = new Set(activeSessions.filter((session) => activePresence(session.userId)).map((session) => session.userId));
+    const activeSessionByUserId = new Map(activeSessions.map((session) => [session.userId, session]));
 
     return ok({
-      users: users.map((user) => ({ ...user, profile: user.profile ? profileForAudience(user.profile, "PUBLIC") : null, isLocationVisible: visibleUserIds.has(user.id) })),
+      users: users.map((user) => {
+        const session = activeSessionByUserId.get(user.id);
+        const currentPresence = session ? activePresence(user.id) : null;
+        return {
+          ...user,
+          profile: user.profile ? profileForAudience(user.profile, "PUBLIC") : null,
+          isLocationVisible: Boolean(currentPresence),
+          lastActiveAt: currentPresence?.updatedAt ? new Date(currentPresence.updatedAt).toISOString() : session?.startedAt.toISOString() ?? null,
+        };
+      }),
       nextCursor,
     });
   } catch (error) {

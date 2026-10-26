@@ -22,8 +22,16 @@ export async function POST(request: Request) {
     const today = new Date(); let age = today.getUTCFullYear() - dob.getUTCFullYear();
     if (today.getUTCMonth() < dob.getUTCMonth() || (today.getUTCMonth() === dob.getUTCMonth() && today.getUTCDate() < dob.getUTCDate())) age--;
     const effectiveAdult = input.declaredAdult && age >= 18;
-    const existing = await db.user.findFirst({ where: { OR: [{ email: input.email }, { handle: input.handle }] } });
-    if (existing) return fail("ACCOUNT_EXISTS", "Имейлът или потребителското име вече се използва.", 409);
+    const existing = await db.user.findFirst({
+      where: { OR: [{ email: input.email }, { handle: input.handle }] },
+      select: { email: true, handle: true },
+    });
+    if (existing?.email === input.email) {
+      return fail("EMAIL_ALREADY_USED", "Вече има профил с този имейл. Опитай да влезеш в него.", 409);
+    }
+    if (existing?.handle === input.handle) {
+      return fail("HANDLE_ALREADY_USED", "Това потребителско име вече е заето. Избери друго.", 409);
+    }
     const user = await db.user.create({ data: { email: input.email, handle: input.handle, passwordHash: await hash(input.password, 12), dateOfBirth: dob, declaredAdult: effectiveAdult, profile: { create: { displayName: input.displayName } } } });
     await issueSession(user.id);
     return ok({ user: { id: user.id, handle: user.handle, declaredAdult: user.declaredAdult, ageVerified: false } }, 201);
