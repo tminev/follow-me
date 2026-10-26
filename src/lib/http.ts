@@ -26,6 +26,9 @@ export function apiError(error: unknown) {
   if (error instanceof Error && error.message === "UNAUTHORIZED") {
     return fail("UNAUTHORIZED", "Сесията ти е изтекла. Влез отново в профила си.", 401);
   }
+  if (error instanceof Error && error.message === "PRESENCE_UNAVAILABLE") {
+    return fail("PRESENCE_UNAVAILABLE", "Картата временно не е налична. Опитай отново след малко.", 503);
+  }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2002") return fail("ALREADY_EXISTS", "Тези данни вече се използват.", 409);
     if (error.code === "P2003") return fail("RELATED_RESOURCE_NOT_FOUND", "Избраният профил или запис вече не е наличен.", 404);

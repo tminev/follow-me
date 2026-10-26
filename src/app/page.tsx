@@ -15,6 +15,8 @@ async function api(path: string, init?: RequestInit) { const r = await fetch(`/a
 export default function Home() {
   const [me, setMe] = useState<Me | null | undefined>();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [safetyOpen, setSafetyOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [chatAlerts, setChatAlerts] = useState<ChatAlert[]>([]);
   const [incomingRequestVersion, setIncomingRequestVersion] = useState(0);
@@ -51,6 +53,8 @@ export default function Home() {
       <div className="brand"><img src="/follow-me-logo.png" alt="Follow Me" onError={(event) => { event.currentTarget.style.display = "none"; }} /><span className="brand-wordmark">Follow<span>Me</span></span><small>Свързване с контрол</small></div>
       <div className="actions">
         <PushNotifications notify={setNotice} />
+        <button type="button" className="ghost small" onClick={() => setProgressOpen(true)}>Искри</button>
+        <button type="button" className="ghost small" onClick={() => setSafetyOpen(true)}>Безопасност</button>
         <button className="profile-trigger" aria-label="Отвори профила" title="Профил" onClick={() => setProfileOpen(true)}>
           {me.profile.avatarUrl ? <img src={me.profile.avatarUrl} alt="" /> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.42 0-8 2.01-8 4.5V20h16v-1.5c0-2.49-3.58-4.5-8-4.5Z" /></svg>}
         </button>
@@ -66,7 +70,23 @@ export default function Home() {
         <Profile me={me} reload={refresh} notify={setNotice} onClose={() => setProfileOpen(false)} />
       </section>
     </div>}
+    {progressOpen && <ProgressionModal onClose={() => setProgressOpen(false)} />}
+    {safetyOpen && <SafetyModal onClose={() => setSafetyOpen(false)} />}
   </main>;
+}
+
+function ProgressionModal({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<{ wallet: { sparks: number }; progression: { xp: number; level: number; loyaltyPoints: number } }>();
+  const [error, setError] = useState("");
+  useEffect(() => { api("/progression").then((result) => setData(result)).catch((reason: Error) => setError(reason.message)); }, []);
+  return <div className="profile-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="profile-modal progression-modal" role="dialog" aria-modal="true" aria-label="Напредък" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Затвори">×</button><h2>Твоят напредък</h2>{error ? <p className="error">{error}</p> : !data ? <p>Зареждане…</p> : <div className="progression-grid"><div><small>Искри</small><b>{data.wallet.sparks}</b><span>За бъдещи теми, аватари и игрови жокери.</span></div><div><small>Ниво</small><b>{data.progression.level}</b><span>{data.progression.xp} XP</span></div><div><small>Лоялност</small><b>{data.progression.loyaltyPoints}</b><span>Печели се от завършени игри.</span></div></div>}<p className="progression-note">Искрите не могат да се купуват, прехвърлят или използват за чужда локация.</p></section></div>;
+}
+
+function SafetyModal({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<{ blocked: { blocked: { id: string; handle: string; profile: { displayName: string } | null } }[]; hidden: { excludedUser: { id: string; handle: string; profile: { displayName: string } | null } }[]; reports: { id: string; category: string; status: string; targetUser: { handle: string; profile: { displayName: string } | null } | null }[] }>();
+  const [error, setError] = useState("");
+  useEffect(() => { api("/safety").then((result) => setData(result)).catch((reason: Error) => setError(reason.message)); }, []);
+  return <div className="profile-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="profile-modal safety-modal" role="dialog" aria-modal="true" aria-label="Безопасност" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Затвори">×</button><h2>Безопасност</h2>{error ? <p className="error">{error}</p> : !data ? <p>Зареждане…</p> : <div className="safety-grid"><section><h3>Блокирани</h3>{data.blocked.length ? data.blocked.map(({ blocked }) => <p key={blocked.id}>{blocked.profile?.displayName ?? `@${blocked.handle}`}</p>) : <small>Няма блокирани профили.</small>}</section><section><h3>Скрити от картата</h3>{data.hidden.length ? data.hidden.map(({ excludedUser }) => <p key={excludedUser.id}>{excludedUser.profile?.displayName ?? `@${excludedUser.handle}`}</p>) : <small>Няма скрити профили.</small>}</section><section><h3>Мои сигнали</h3>{data.reports.length ? data.reports.map((report) => <p key={report.id}>{report.targetUser?.profile?.displayName ?? "Профил"} <small>{report.status}</small></p>) : <small>Няма изпратени сигнали.</small>}</section></div>}<p className="progression-note">Сигналите се разглеждат поверително.</p></section></div>;
 }
 function Discover({ notify }: { notify: (x: string) => void }) { const [users, setUsers] = useState<Person[]>([]); useEffect(() => { api("/discover/users").then(x => setUsers(x.users)) }, []); return <Panel title="Открий хора" subtitle="Публични профили без имейл, рождена дата или местоположение."><Grid>{users.map(u => <PersonCard key={u.id} p={u}><button className="primary small" onClick={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: u.id }) }); notify("Поканата е изпратена.") } catch (e) { notify((e as Error).message) } }}>Добави</button></PersonCard>)}</Grid></Panel> }
 function Requests({ notify, refreshToken }: { notify: (x: string) => void; refreshToken: number }) {

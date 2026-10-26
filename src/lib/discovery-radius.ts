@@ -7,10 +7,10 @@ export type DiscoveryRadius = {
   loyaltyLabel: string;
 };
 
-// Temporary policy hook. When the loyalty programme is added, this function will
-// read the member's loyalty status from the database instead of returning STANDARD.
-export function loyaltyLevelForUser(_userId: string): LoyaltyLevel {
-  return "STANDARD";
+export async function loyaltyLevelForUser(userId: string): Promise<LoyaltyLevel> {
+  const { db } = await import("@/lib/db");
+  const progression = await db.progression.findUnique({ where: { userId }, select: { loyaltyPoints: true } });
+  return (progression?.loyaltyPoints ?? 0) >= 100 ? "LOYAL" : "STANDARD";
 }
 
 export function discoveryRadiusFor(loyaltyLevel: LoyaltyLevel): DiscoveryRadius {

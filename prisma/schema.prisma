@@ -12,6 +12,59 @@ enum AgeVerificationStatus {
   VERIFIED
 }
 
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  RESTRICTED
+  SUSPENDED
+  BANNED
+}
+
+enum ReportCategory {
+  UNWANTED_CONTACT
+  HARASSMENT
+  THREAT
+  SEXUAL_CONTENT
+  FAKE_PROFILE
+  BLOCK_EVASION
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  WARNING
+  CONTACT_COOLDOWN
+  SUSPEND
+  BAN
+  RESTORE
+}
+
+enum GameState {
+  INVITED
+  ACTIVE
+  COMPLETED
+  DECLINED
+  EXPIRED
+}
+
+enum GameParticipantStatus {
+  INVITED
+  JOINED
+  COMPLETED
+  DECLINED
+}
+
 enum FriendRequestStatus {
   PENDING
   ACCEPTED
@@ -26,6 +79,8 @@ model User {
   declaredAdult         Boolean @default(false)
   dateOfBirth           DateTime
   ageVerificationStatus AgeVerificationStatus @default(UNVERIFIED)
+  role                  UserRole @default(USER)
+  accountStatus         AccountStatus @default(ACTIVE)
   createdAt             DateTime @default(now())
   profile               Profile?
   interests             UserInterest[]
@@ -42,6 +97,16 @@ model User {
   visibilitySessions    VisibilitySession[]
   visibilityExclusions  VisibilityExclusion[] @relation("visibilityOwner")
   excludedFrom          VisibilityExclusion[] @relation("visibilityExcluded")
+  wallet                WalletBalance?
+  progression           Progression?
+  sparkLedger           SparkLedger[]
+  xpLedger              XpLedger[]
+  loyaltyLedger         LoyaltyLedger[]
+  reportsMade           Report[] @relation("reporter")
+  reportsReceived       Report[] @relation("reportedUser")
+  gamesCreated          GameSession[] @relation("gameCreator")
+  gameParticipants      GameParticipant[]
+  moderationActionsMade ModerationAction[] @relation("moderator")
 }
 
 model Profile {
@@ -180,4 +245,114 @@ model VisibilityExclusion {
   owner          User @relation("visibilityOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   excludedUser   User @relation("visibilityExcluded", fields: [excludedUserId], references: [id], onDelete: Cascade)
   @@id([ownerId, excludedUserId])
+}
+
+model WalletBalance {
+  userId    String @id
+  balance   Int @default(0)
+  version   Int @default(0)
+  updatedAt DateTime @updatedAt
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Progression {
+  userId        String @id
+  xp            Int @default(0)
+  loyaltyPoints Int @default(0)
+  level         Int @default(1)
+  lastActiveAt  DateTime?
+  updatedAt     DateTime @updatedAt
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SparkLedger {
+  id             String @id @default(cuid())
+  userId         String
+  delta          Int
+  eventType      String
+  idempotencyKey String @unique
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+model XpLedger {
+  id             String @id @default(cuid())
+  userId         String
+  delta          Int
+  eventType      String
+  idempotencyKey String @unique
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+model LoyaltyLedger {
+  id             String @id @default(cuid())
+  userId         String
+  delta          Int
+  eventType      String
+  idempotencyKey String @unique
+  createdAt      DateTime @default(now())
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+model GameSession {
+  id          String @id @default(cuid())
+  gameCode    String
+  state       GameState @default(INVITED)
+  createdById String
+  payload     Json?
+  expiresAt   DateTime
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  createdBy   User @relation("gameCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  participants GameParticipant[]
+  @@index([createdById, createdAt])
+  @@index([state, expiresAt])
+}
+
+model GameParticipant {
+  gameId      String
+  userId      String
+  status      GameParticipantStatus @default(INVITED)
+  answers     Json?
+  joinedAt    DateTime?
+  completedAt DateTime?
+  game        GameSession @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([gameId, userId])
+  @@index([userId, status])
+}
+
+model Report {
+  id           String @id @default(cuid())
+  reporterId   String
+  targetUserId String?
+  category     ReportCategory
+  details      String?
+  status       ReportStatus @default(OPEN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  reporter     User @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser   User? @relation("reportedUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  @@index([reporterId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ModerationAction {
+  id          String @id @default(cuid())
+  reportId    String?
+  targetId    String
+  moderatorId String
+  action      ModerationActionType
+  reason      String
+  startsAt    DateTime @default(now())
+  endsAt      DateTime?
+  createdAt   DateTime @default(now())
+  moderator   User @relation("moderator", fields: [moderatorId], references: [id], onDelete: Restrict)
+  @@index([targetId, createdAt])
 }

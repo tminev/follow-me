@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { apiError, ok } from "@/lib/http";
-import { activePresence } from "@/lib/presence";
+import { getActivePresence } from "@/lib/presence";
 import { publicUserSelect } from "@/lib/public-user";
 import { profileForAudience } from "@/lib/profile-visibility";
 
@@ -33,16 +33,16 @@ export async function GET(request: Request) {
     const activeSessionByUserId = new Map(activeSessions.map((session) => [session.userId, session]));
 
     return ok({
-      users: users.map((user) => {
+      users: await Promise.all(users.map(async (user) => {
         const session = activeSessionByUserId.get(user.id);
-        const currentPresence = session ? activePresence(user.id) : null;
+        const currentPresence = session ? await getActivePresence(user.id) : null;
         return {
           ...user,
           profile: user.profile ? profileForAudience(user.profile, "PUBLIC") : null,
           isLocationVisible: Boolean(currentPresence),
           lastActiveAt: currentPresence?.updatedAt ? new Date(currentPresence.updatedAt).toISOString() : session?.startedAt.toISOString() ?? null,
         };
-      }),
+      })),
       nextCursor,
     });
   } catch (error) {

@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { apiError, fail, ok } from "@/lib/http";
 import { canUseLocation } from "@/lib/policies";
-import { activePresence, presence } from "@/lib/presence";
+import { getActivePresence, putPresence } from "@/lib/presence";
 import { distanceInMeters } from "@/lib/discovery-radius";
 import { reserveProximityAlert } from "@/lib/proximity-alerts";
 import { getAppSocket } from "@/lib/app-socket";
@@ -16,7 +16,7 @@ const schema = z.object({
 });
 
 async function notifyPeopleNearby(userId: string) {
-  const source = activePresence(userId);
+  const source = await getActivePresence(userId);
   if (!source) return;
 
   const [sourceUser, sessions, blocks, exclusions] = await Promise.all([
@@ -42,7 +42,7 @@ async function notifyPeopleNearby(userId: string) {
 
   for (const session of sessions) {
     if (blockedUserIds.has(session.userId) || hiddenUserIds.has(session.userId)) continue;
-    const target = activePresence(session.userId);
+    const target = await getActivePresence(session.userId);
     if (!target || distanceInMeters(source, target) > 200) continue;
     if (!reserveProximityAlert(userId, session.userId)) continue;
 
@@ -70,7 +70,7 @@ export async function PUT(request: Request) {
     if (!session) return fail("VISIBILITY_OFF", "\u041f\u044a\u0440\u0432\u043e \u0432\u043a\u043b\u044e\u0447\u0435\u0442\u0435 \u0432\u0438\u0434\u0438\u043c\u043e\u0441\u0442\u0442\u0430.", 409);
 
     const point = schema.parse(await request.json());
-    presence.set(me, { ...point, expiresAt: Math.min(session.expiresAt.getTime(), Date.now() + 120_000), updatedAt: Date.now() });
+    await putPresence(me, { ...point, expiresAt: Math.min(session.expiresAt.getTime(), Date.now() + 120_000), updatedAt: Date.now() });
     getAppSocket()?.emit("map:refresh");
     void notifyPeopleNearby(me).catch((error: unknown) => console.error("Could not evaluate proximity notification", error));
 

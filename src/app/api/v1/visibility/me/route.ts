@@ -1,7 +1,7 @@
-﻿import { db } from "@/lib/db";
+import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { apiError, ok } from "@/lib/http";
-import { activePresence } from "@/lib/presence";
+import { getActivePresence } from "@/lib/presence";
 
 export async function GET() {
   try {
@@ -11,7 +11,7 @@ export async function GET() {
       orderBy: { startedAt: "desc" },
     });
     return ok({
-      visible: Boolean(session && activePresence(me)),
+      visible: Boolean(session && await getActivePresence(me)),
       session: session ? { id: session.id, expiresAt: session.expiresAt, continuous: session.shareMode === "CONTINUOUS" } : null,
     });
   } catch (error) {
