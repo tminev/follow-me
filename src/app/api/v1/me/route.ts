@@ -18,7 +18,7 @@ const profileSchema = z.object({
   visibility: visibilitySchema.optional(),
 });
 export async function GET() {
-  try { const id = await requireUserId(); const user = await db.user.findUniqueOrThrow({ where: { id }, select: { id: true, handle: true, email: true, declaredAdult: true, ageVerificationStatus: true, profile: true, interests: { select: { interest: true } } } }); return ok({ user }); } catch (e) { return apiError(e); }
+  try { const id = await requireUserId(); const user = await db.user.findUniqueOrThrow({ where: { id }, select: { id: true, handle: true, email: true, declaredAdult: true, ageVerificationStatus: true, role: true, profile: true, interests: { select: { interest: true } } } }); return ok({ user }); } catch (e) { return apiError(e); }
 }
 export async function PATCH(request: Request) {
   try {

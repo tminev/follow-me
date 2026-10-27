@@ -1,0 +1,14 @@
+CREATE TABLE `Notification` (
+  `id` VARCHAR(191) NOT NULL,
+  `userId` VARCHAR(191) NOT NULL,
+  `type` ENUM('FRIEND_REQUEST', 'FRIEND_REQUEST_ACCEPTED', 'FRIEND_REQUEST_DECLINED', 'NEW_MESSAGE', 'GAME_INVITATION', 'GAME_UPDATE') NOT NULL,
+  `title` VARCHAR(191) NOT NULL,
+  `body` VARCHAR(191) NOT NULL,
+  `url` VARCHAR(191) NULL,
+  `payload` JSON NULL,
+  `readAt` DATETIME(3) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  INDEX `Notification_userId_readAt_createdAt_idx`(`userId`, `readAt`, `createdAt`),
+  CONSTRAINT `Notification_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

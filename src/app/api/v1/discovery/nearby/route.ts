@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { apiError, fail, ok } from "@/lib/http";
-import { activePresence } from "@/lib/presence";
+import { getActivePresence } from "@/lib/presence";
 import { canUseLocation } from "@/lib/policies";
 import { discoveryRadiusFor, distanceInMeters, loyaltyLevelForUser } from "@/lib/discovery-radius";
 import { profileForAudience } from "@/lib/profile-visibility";
@@ -15,9 +15,9 @@ export async function GET() {
     });
     if (!canUseLocation(viewer)) return fail("AGE_VERIFICATION_REQUIRED", "Откриването е достъпно само за пълнолетни потребители.", 403);
 
-    const loyaltyLevel = loyaltyLevelForUser(me);
+    const loyaltyLevel = await loyaltyLevelForUser(me);
     const radius = discoveryRadiusFor(loyaltyLevel);
-    const viewerPresence = activePresence(me);
+    const viewerPresence = await getActivePresence(me);
     if (!viewerPresence) return ok({ users: [], radiusMeters: radius.meters, loyaltyLabel: radius.loyaltyLabel });
 
     const blocks = await db.userBlock.findMany({ where: { OR: [{ blockerId: me }, { blockedId: me }] } });
@@ -41,10 +41,10 @@ export async function GET() {
         },
       },
     });
-    const users = sessions.flatMap((session) => {
-      const presence = activePresence(session.userId);
-      if (!presence || distanceInMeters(viewerPresence, presence) > radius.meters) return [];
-      return [{
+    const users = (await Promise.all(sessions.map(async (session) => {
+      const presence = await getActivePresence(session.userId);
+      if (!presence || distanceInMeters(viewerPresence, presence) > radius.meters) return null;
+      return {
         id: session.user.id,
         handle: session.user.handle,
         displayName: session.user.profile?.displayName ?? session.user.handle,
@@ -52,8 +52,8 @@ export async function GET() {
         latitude: presence.latitude,
         longitude: presence.longitude,
         precision: "exact" as const,
-      }];
-    });
+      };
+    }))).filter((user): user is NonNullable<typeof user> => user !== null);
 
     return ok({ users, radiusMeters: radius.meters, loyaltyLabel: radius.loyaltyLabel });
   } catch (error) {

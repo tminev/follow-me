@@ -18,6 +18,7 @@ export interface ChatClientEvents {
 }
 
 export interface ChatServerEvents {
+  "map:refresh": () => void;
   "chat:message": (data: { conversationId: string; message: ChatMessage }) => void;
   "notification:friend-request": (data: {
     requestId: string;
@@ -35,6 +36,7 @@ export interface ChatServerEvents {
     message: ChatMessage;
     sender: { handle: string; displayName: string };
   }) => void;
+  "notification:new": (data: { id: string; type: string; title: string; body: string; url: string | null; createdAt: string }) => void;
 }
 
 export interface ChatSocketData {

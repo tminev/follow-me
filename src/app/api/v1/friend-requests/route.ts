@@ -5,6 +5,7 @@ import { apiError, fail, ok } from "@/lib/http";
 import { areBlocked, areFriends } from "@/lib/social";
 import { getAppSocket } from "@/lib/app-socket";
 import { sendPushToUser } from "@/lib/web-push";
+import { notifyUser } from "@/lib/notifications";
 
 const schema = z.object({ recipientId: z.string().min(1), intro: z.string().trim().max(160).optional() });
 const invitationUserSelect = {
@@ -17,6 +18,8 @@ export async function POST(request: Request) {
     const senderId = await requireUserId();
     const input = schema.parse(await request.json());
     if (senderId === input.recipientId) return fail("SELF_REQUEST", "Не можете да поканите себе си.", 400);
+    const recipient = await db.user.findUnique({ where: { id: input.recipientId }, select: { id: true } });
+    if (!recipient) return fail("USER_NOT_FOUND", "Този профил вече не е наличен.", 404);
     if (await areBlocked(senderId, input.recipientId)) return fail("BLOCKED", "Контактът не е разрешен.", 403);
     if (await areFriends(senderId, input.recipientId)) return fail("ALREADY_FRIENDS", "Вече сте приятели.", 409);
     const reverse = await db.friendRequest.findFirst({ where: { senderId: input.recipientId, receiverId: senderId, status: "PENDING" } });
@@ -27,6 +30,7 @@ export async function POST(request: Request) {
     ]);
     if (!sender) return fail("UNAUTHORIZED", "Необходим е вход.", 401);
     getAppSocket()?.to(`user:${input.recipientId}`).emit("notification:friend-request", { requestId: item.id, sender: { handle: sender.handle, displayName: sender.profile?.displayName ?? sender.handle }, createdAt: item.createdAt.toISOString() });
+    void notifyUser({ userId: input.recipientId, type: "FRIEND_REQUEST", title: "Нова покана", body: `${sender.profile?.displayName ?? sender.handle} ти изпрати покана за приятелство.`, url: "/", payload: { requestId: item.id }, push: false }).catch((error) => console.error("Could not create friend request notification", error));
     void sendPushToUser(input.recipientId, { title: "Нова покана", body: `${sender.profile?.displayName ?? sender.handle} ти изпрати покана за приятелство.`, url: "/" }).catch((error) => console.error("Could not send friend request push notification", error));
     return ok({ request: item }, 201);
   } catch (error) { return apiError(error); }

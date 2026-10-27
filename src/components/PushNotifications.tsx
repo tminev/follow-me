@@ -25,11 +25,20 @@ function decodeApplicationServerKey(key: string) {
 export function PushNotifications({ notify }: { notify: (message: string) => void }) {
   const [status, setStatus] = useState<PushStatus>("loading");
   const [busy, setBusy] = useState(false);
+  const label = busy
+    ? "Настройване на push известията"
+    : status === "loading"
+      ? "Проверка на push известията"
+      : status === "unavailable"
+        ? "Push известията не са налични"
+        : status === "enabled"
+          ? "Изключи push известията"
+          : "Включи push известията";
 
   useEffect(() => {
     if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-      setStatus("unavailable");
-      return;
+      const timer = window.setTimeout(() => setStatus("unavailable"), 0);
+      return () => window.clearTimeout(timer);
     }
     api("/push-subscriptions")
       .then(async (settings) => {
@@ -83,21 +92,19 @@ export function PushNotifications({ notify }: { notify: (message: string) => voi
 
   return (
     <button
-      className="ghost small"
-      aria-label="Push известия за целия сайт"
-      title="Настрой push известията за покани и чат из целия сайт"
+      className={`push-notifications-button ${status}${busy ? " busy" : ""}`}
+      aria-label={label}
+      aria-pressed={status === "enabled"}
+      title={label}
       disabled={busy || status === "loading" || status === "unavailable"}
       onClick={toggle}
     >
-      {busy
-        ? "Настройване…"
-        : status === "loading"
-          ? "Зареждане…"
-          : status === "unavailable"
-            ? "Push не е настроен"
-            : status === "enabled"
-              ? "Push за сайта: включени"
-              : "Включи push за сайта"}
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path className="push-notifications-bell" d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" />
+        <path className="push-notifications-clapper" d="M10 21h4" />
+        {status === "unavailable" && <path className="push-notifications-slash" d="M4 4 20 20" />}
+      </svg>
+      {status === "enabled" && <span className="push-notifications-dot" aria-hidden="true" />}
     </button>
   );
 }
