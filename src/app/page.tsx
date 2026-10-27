@@ -8,8 +8,9 @@ import { AuthLanding } from "@/components/AuthLanding";
 import type { MapMarker } from "@/components/MapCanvas";
 import type { ChatClientEvents, ChatMessage, ChatServerEvents } from "@/lib/chat-socket";
 import { parseProfileVisibility } from "@/lib/profile-visibility";
+import { ROMANTIC_GAMES } from "@/lib/romantic-games";
 const MapCanvas = dynamic(() => import("@/components/MapCanvas"), { ssr: false, loading: () => <div className="map-loading">Зареждане на картата…</div> });
-type ProfileData = { displayName: string; bio?: string | null; city?: string | null; neighborhood?: string | null; avatarUrl?: string | null; heightCm?: number | null; hairColor?: string | null; interestsText?: string | null; lookingFor?: string | null; favoriteMovie?: string | null; favoriteBook?: string | null; occupation?: string | null; education?: string | null; languages?: string | null; weekendStyle?: string | null; firstDateIdea?: string | null; profileVisibility?: string | null }; type Me = { id: string; handle: string; declaredAdult: boolean; ageVerificationStatus: string; profile: ProfileData }; type Person = { id: string; handle: string; isLocationVisible?: boolean; lastActiveAt?: string | null; profile: ProfileData }; type RequestItem = { id: string; status: string; sender?: Person; receiver?: Person }; type Conversation = { id: string; person: Person; lastMessage?: { body: string } };
+type ProfileData = { displayName: string; bio?: string | null; city?: string | null; neighborhood?: string | null; avatarUrl?: string | null; heightCm?: number | null; hairColor?: string | null; interestsText?: string | null; lookingFor?: string | null; favoriteMovie?: string | null; favoriteBook?: string | null; occupation?: string | null; education?: string | null; languages?: string | null; weekendStyle?: string | null; firstDateIdea?: string | null; profileVisibility?: string | null }; type Me = { id: string; handle: string; declaredAdult: boolean; ageVerificationStatus: string; role: "USER" | "MODERATOR" | "ADMIN"; profile: ProfileData }; type Person = { id: string; handle: string; isLocationVisible?: boolean; lastActiveAt?: string | null; profile: ProfileData }; type RequestItem = { id: string; status: string; sender?: Person; receiver?: Person }; type Conversation = { id: string; person: Person; lastMessage?: { body: string } };
 type ChatAlert = { id: string; sender: { handle: string; displayName: string }; body: string };
 async function api(path: string, init?: RequestInit) { const r = await fetch(`/api/v1${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }); const text = await r.text(); let data: unknown; try { data = text ? JSON.parse(text) : {} } catch { throw new Error(r.status === 502 ? "Връзката към локалния сървър е прекъсната. Рестартирай тунела и опитай отново." : "Сървърът върна невалиден отговор.") } if (!r.ok) throw new Error(typeof data === "object" && data !== null && "message" in data ? String(data.message) : "Грешка"); return data }
 export default function Home() {
@@ -18,6 +19,7 @@ export default function Home() {
   const [progressOpen, setProgressOpen] = useState(false);
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [moderationPending, setModerationPending] = useState(0);
   const [chatAlerts, setChatAlerts] = useState<ChatAlert[]>([]);
   const [incomingRequestVersion, setIncomingRequestVersion] = useState(0);
   const refresh = () => api("/me").then((data) => setMe(data.user)).catch(() => setMe(null));
@@ -32,6 +34,11 @@ export default function Home() {
   };
 
   useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    if (!me || (me.role !== "ADMIN" && me.role !== "MODERATOR")) { setModerationPending(0); return; }
+    const load = () => api("/moderation/reports").then((data) => setModerationPending(data.reports.filter((report: { status: string }) => report.status === "OPEN").length)).catch(() => setModerationPending(0));
+    void load(); const timer = window.setInterval(() => void load(), 20_000); return () => window.clearInterval(timer);
+  }, [me]);
   useEffect(() => { if (!profileOpen) return; const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setProfileOpen(false); }; window.addEventListener("keydown", closeOnEscape); return () => window.removeEventListener("keydown", closeOnEscape); }, [profileOpen]);
   useEffect(() => {
     if (!me) return;
@@ -42,6 +49,7 @@ export default function Home() {
     });
     client.on("notification:friend-request-updated", ({ status, recipient }) => setNotice(status === "ACCEPTED" ? `${recipient.displayName} прие поканата ти.` : `${recipient.displayName} отказа поканата ти.`));
     client.on("notification:message", ({ sender, message }) => { setNotice(`Ново съобщение от ${sender.displayName}: ${message.body.slice(0, 80)}`); setChatAlerts((alerts) => [{ id: message.id, sender, body: message.body }, ...alerts.filter((alert) => alert.id !== message.id)].slice(0, 5)); });
+    client.on("notification:new", ({ title, body }) => setNotice(`${title}: ${body}`));
     return () => client.disconnect();
   }, [me]);
 
@@ -53,6 +61,7 @@ export default function Home() {
       <div className="brand"><img src="/follow-me-logo.png" alt="Follow Me" onError={(event) => { event.currentTarget.style.display = "none"; }} /><span className="brand-wordmark">Follow<span>Me</span></span><small>Свързване с контрол</small></div>
       <div className="actions">
         <PushNotifications notify={setNotice} />
+        {(me.role === "ADMIN" || me.role === "MODERATOR") && <a className={`moderation-link ${moderationPending ? "has-pending" : ""}`} href="/moderation">Модерация{moderationPending > 0 && <b>{moderationPending}</b>}</a>}
         <button type="button" className="ghost small" onClick={() => setProgressOpen(true)}>Искри</button>
         <button type="button" className="ghost small" onClick={() => setSafetyOpen(true)}>Безопасност</button>
         <button className="profile-trigger" aria-label="Отвори профила" title="Профил" onClick={() => setProfileOpen(true)}>
@@ -88,6 +97,74 @@ function SafetyModal({ onClose }: { onClose: () => void }) {
   useEffect(() => { api("/safety").then((result) => setData(result)).catch((reason: Error) => setError(reason.message)); }, []);
   return <div className="profile-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="profile-modal safety-modal" role="dialog" aria-modal="true" aria-label="Безопасност" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Затвори">×</button><h2>Безопасност</h2>{error ? <p className="error">{error}</p> : !data ? <p>Зареждане…</p> : <div className="safety-grid"><section><h3>Блокирани</h3>{data.blocked.length ? data.blocked.map(({ blocked }) => <p key={blocked.id}>{blocked.profile?.displayName ?? `@${blocked.handle}`}</p>) : <small>Няма блокирани профили.</small>}</section><section><h3>Скрити от картата</h3>{data.hidden.length ? data.hidden.map(({ excludedUser }) => <p key={excludedUser.id}>{excludedUser.profile?.displayName ?? `@${excludedUser.handle}`}</p>) : <small>Няма скрити профили.</small>}</section><section><h3>Мои сигнали</h3>{data.reports.length ? data.reports.map((report) => <p key={report.id}>{report.targetUser?.profile?.displayName ?? "Профил"} <small>{report.status}</small></p>) : <small>Няма изпратени сигнали.</small>}</section></div>}<p className="progression-note">Сигналите се разглеждат поверително.</p></section></div>;
 }
+type RomanticGame = {
+  id: string; gameCode: string; state: "INVITED" | "ACTIVE" | "COMPLETED" | "DECLINED" | "EXPIRED"; expiresAt: string; completedAt?: string | null;
+  createdById: string; payload?: { title?: string; questions?: string[] } | null;
+  createdBy: { handle: string; profile: { displayName: string } | null };
+  participants: { userId: string; status: "INVITED" | "JOINED" | "COMPLETED" | "DECLINED"; answers?: unknown; user: { id: string; handle: string; profile: { displayName: string; avatarUrl?: string | null } | null } }[];
+};
+
+function GamesModal({ meId, onClose, initialFriendId }: { meId: string; onClose: () => void; initialFriendId?: string }) {
+  const [games, setGames] = useState<RomanticGame[]>([]);
+  const [friends, setFriends] = useState<Person[]>([]);
+  const [friendId, setFriendId] = useState(initialFriendId ?? "");
+  const [gameCode, setGameCode] = useState("THREE_QUESTIONS");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    const [gameResult, friendResult] = await Promise.all([api("/games"), api("/friends")]);
+    setGames(gameResult.games); setFriends(friendResult.friends);
+  }, []);
+  useEffect(() => {
+    void load().catch((reason: Error) => setError(reason.message));
+    const refreshId = window.setInterval(() => { void load().catch(() => undefined); }, 5_000);
+    return () => window.clearInterval(refreshId);
+  }, [load]);
+  const perform = async (key: string, path: string, body: unknown) => {
+    setBusy(key); setError("");
+    try { await api(path, { method: "POST", body: JSON.stringify(body) }); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Действието не можа да бъде изпълнено."); }
+    finally { setBusy(""); }
+  };
+  const createGame = () => { if (!friendId) { setError("Избери приятел, с когото да играеш."); return; } void perform("create", "/games", { participantId: friendId, gameCode }); };
+  const name = (participant: RomanticGame["participants"][number]) => participant.user.profile?.displayName ?? `@${participant.user.handle}`;
+  const answers = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  const hasOpenGame = games.some((game) => game.state === "INVITED" || game.state === "ACTIVE");
+  return <div className="profile-modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <section className="profile-modal games-modal" role="dialog" aria-modal="true" aria-label="Игри" onMouseDown={(event) => event.stopPropagation()}>
+      <button className="modal-close" onClick={onClose} aria-label="Затвори">×</button>
+      <div className="games-head"><h2>Игри за двама</h2></div>
+      {error && <p className="error">{error}</p>}
+      {!hasOpenGame && <section className="games-create">
+        <label>Избери игра<select value={gameCode} onChange={(event) => setGameCode(event.target.value)}>{ROMANTIC_GAMES.map((game) => <option value={game.code} key={game.code}>{game.title}</option>)}</select></label>
+        <label>С кого искаш да играеш?<select value={friendId} onChange={(event) => setFriendId(event.target.value)}><option value="">Избери приятел</option>{friends.map((friend) => <option value={friend.id} key={friend.id}>{friend.profile.displayName}</option>)}</select></label>
+        <button className="primary" disabled={busy === "create" || !friends.length} onClick={createGame}>{busy === "create" ? "Изпращане…" : "Изпрати покана"}</button>
+      </section>}
+      <div className="games-list">{games.length === 0 ? <p className="games-empty">Избери игра и изпрати покана на приятел.</p> : games.map((game) => {
+        const mine = game.participants.find((participant) => participant.userId === meId);
+        const other = game.participants.find((participant) => participant.userId !== meId);
+        if (!mine || !other) return null;
+        const questions = game.payload?.questions ?? [];
+        const title = game.payload?.title ?? ROMANTIC_GAMES.find((item) => item.code === game.gameCode)?.title ?? "Игра";
+        const mineAnswers = answers(mine.answers);
+        const allAnswered = game.participants.every((participant) => answers(participant.answers).filter(Boolean).length === 3);
+        return <article className={`game-card game-${game.state.toLowerCase()}`} key={game.id}>
+          <header><div><small>{game.state === "INVITED" ? "ПОКАНА" : game.state === "ACTIVE" ? "В ХОД" : "ПРИКЛЮЧЕНА"}</small><h3>{title} · {name(other)}</h3></div><span>{game.state === "COMPLETED" ? "✓" : "✦"}</span></header>
+          {game.state === "INVITED" && mine.status === "INVITED" ? <div className="game-actions"><button className="primary" disabled={busy === `${game.id}-join`} onClick={() => void perform(`${game.id}-join`, `/games/${game.id}/actions`, { action: "JOIN" })}>Приеми</button><button className="invite-decline" disabled={busy === `${game.id}-decline`} onClick={() => void perform(`${game.id}-decline`, `/games/${game.id}/actions`, { action: "DECLINE" })}>Откажи</button></div>
+          : game.state === "INVITED" ? <p className="games-empty">Поканата е изпратена. Чакаме {name(other)} да я приеме.</p>
+          : game.state === "COMPLETED" ? <p className="game-reward">Награда: <b>+30 XP · +10 Искри · +5 лоялност</b></p>
+          : game.state === "ACTIVE" ? <div className="game-questions">{questions.map((question, index) => {
+            const answer = mineAnswers[index]; const key = `${game.id}-${index}`;
+            return <div className="game-question" key={question}><b>{index + 1}</b><label>{question}{answer ? <span className="game-answer">{answer}</span> : <><textarea value={drafts[key] ?? ""} maxLength={500} rows={2} placeholder="Твоят отговор…" onChange={(event) => setDrafts((current) => ({ ...current, [key]: event.target.value }))} /><button type="button" className="ghost small" disabled={busy === key || !(drafts[key] ?? "").trim()} onClick={() => void perform(key, `/games/${game.id}/actions`, { action: "ANSWER", index, answer: drafts[key] })}>Изпрати</button></>}</label></div>;
+          })}<div className="game-actions"><button className="primary" disabled={busy === `${game.id}-complete` || mineAnswers.filter(Boolean).length !== 3} onClick={() => void perform(`${game.id}-complete`, `/games/${game.id}/actions`, { action: "COMPLETE" })}>{allAnswered ? "Приключи и вземи наградата" : "Чакаме другия играч"}</button></div></div>
+          : <p className="games-empty">Тази игра вече не е активна.</p>}
+        </article>;
+      })}</div>
+    </section>
+  </div>;
+}
+
 function Discover({ notify }: { notify: (x: string) => void }) { const [users, setUsers] = useState<Person[]>([]); useEffect(() => { api("/discover/users").then(x => setUsers(x.users)) }, []); return <Panel title="Открий хора" subtitle="Публични профили без имейл, рождена дата или местоположение."><Grid>{users.map(u => <PersonCard key={u.id} p={u}><button className="primary small" onClick={async () => { try { await api("/friend-requests", { method: "POST", body: JSON.stringify({ recipientId: u.id }) }); notify("Поканата е изпратена.") } catch (e) { notify((e as Error).message) } }}>Добави</button></PersonCard>)}</Grid></Panel> }
 function Requests({ notify, refreshToken }: { notify: (x: string) => void; refreshToken: number }) {
   const [items, setItems] = useState<RequestItem[]>([]);
@@ -123,14 +200,21 @@ function Requests({ notify, refreshToken }: { notify: (x: string) => void; refre
     )}</Grid>
   </Panel>;
 }
+function ReportButton({ targetUserId, compact = false }: { targetUserId: string; compact?: boolean }) {
+  const [open, setOpen] = useState(false); const [category, setCategory] = useState("HARASSMENT"); const [details, setDetails] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const send = async () => { setBusy(true); setError(""); try { await api("/reports", { method: "POST", body: JSON.stringify({ targetUserId, category, details }) }); setOpen(false); } catch (cause) { setError(cause instanceof Error ? cause.message : "Докладът не можа да бъде изпратен."); } finally { setBusy(false); } };
+  return <><button type="button" className={compact ? "chat-report" : "profile-report"} onClick={() => setOpen(true)}>Докладвай</button>{open && <div className="profile-modal-backdrop" role="presentation" onMouseDown={() => setOpen(false)}><section className="profile-modal report-modal" role="dialog" aria-modal="true" aria-label="Докладвай профил" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setOpen(false)} aria-label="Затвори">×</button><h2>Докладвай профил</h2><p>Избери най-подходящата причина. Докладът се разглежда поверително.</p><label>Категория<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="UNWANTED_CONTACT">Нежелан контакт</option><option value="HARASSMENT">Тормоз или обиди</option><option value="THREAT">Заплаха</option><option value="SEXUAL_CONTENT">Неподходящо сексуално съдържание</option><option value="FAKE_PROFILE">Фалшив профил</option><option value="BLOCK_EVASION">Заобикаляне на блокиране</option><option value="OTHER">Друго</option></select></label><label>Допълнителна информация <small>(по желание)</small><textarea value={details} maxLength={1000} onChange={(event) => setDetails(event.target.value)} placeholder="Опиши накратко какво се случи…" /></label>{error && <p className="error">{error}</p>}<div className="report-actions"><button className="ghost" onClick={() => setOpen(false)}>Отказ</button><button className="danger" disabled={busy} onClick={() => void send()}>{busy ? "Изпращане…" : "Изпрати сигнал"}</button></div></section></div>}</>;
+}
 function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId: string; openPersonId?: string; embedded?: boolean; onBack?: () => void; onBlock?: () => void }) {
   const [list, setList] = useState<Conversation[]>([]);
   const [active, setActive] = useState<Conversation>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
+  const [gameInviteOpen, setGameInviteOpen] = useState(false);
   const socketRef = useRef<Socket<ChatServerEvents, ChatClientEvents> | null>(null);
   const activeId = useRef<string | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const loadMessages = useCallback((id: string) => {
     api(`/conversations/${id}/messages`)
@@ -205,6 +289,12 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
     };
   }, [active, loadMessages]);
 
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container || messages.length === 0) return;
+    container.scrollTop = container.scrollHeight;
+  }, [active?.id, messages.length]);
+
   function selectConversation(conversation: Conversation) {
     activeId.current = conversation.id;
     setMessages([]);
@@ -239,11 +329,11 @@ function Chats({ meId, openPersonId, embedded = false, onBack, onBlock }: { meId
     <div className="thread">{active ? <>
       <h3>{active.person.profile.displayName}</h3>
       {error && <p className="error">{error}</p>}
-      <div className="messages">{messages.map((message) => <p key={message.id} className={`bubble ${(message.isMine ?? (message.senderId === meId)) ? "mine" : "theirs"}`}>{message.body}</p>)}</div>
-      <form onSubmit={send} className="send"><textarea name="body" rows={1} placeholder="Напиши съобщение…" required disabled={!connected} onInput={(event) => { const field = event.currentTarget; field.style.height = "auto"; field.style.height = `${Math.min(field.scrollHeight, 160)}px`; }} /><button className="primary" disabled={!connected}>Изпрати</button></form>
+      <div className="messages" ref={messagesRef}>{messages.map((message) => <p key={message.id} className={`bubble ${(message.isMine ?? (message.senderId === meId)) ? "mine" : "theirs"}`}>{message.body}</p>)}</div>
+      <form onSubmit={send} className="send"><textarea name="body" rows={1} placeholder="Напиши съобщение…" required disabled={!connected} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} onInput={(event) => { const field = event.currentTarget; field.style.height = "auto"; field.style.height = `${Math.min(field.scrollHeight, 160)}px`; }} /><button className="primary" disabled={!connected}>Изпрати</button></form>
     </> : <div className="empty">Избери разговор</div>}</div>
   </div>;
-  if (embedded) return <div className="map-chat-replacement"><div className="map-chat-head"><button className="ghost small" onClick={onBack}>← Към картата</button><span>{connected ? "Чат на живо" : "Свързване…"}</span>{onBlock && <button className="chat-block" onClick={onBlock}>Блокирай</button>}</div>{chatLayout}</div>;
+  if (embedded) return <><div className="map-chat-replacement"><div className="map-chat-head"><button className="ghost small" onClick={onBack}>← Към картата</button>{!connected && <span>Свързване…</span>}<button className="chat-game" onClick={() => setGameInviteOpen(true)}>Игра</button>{openPersonId && <ReportButton targetUserId={openPersonId} compact />}{onBlock && <button className="chat-block" onClick={onBlock}>Блокирай</button>}</div>{chatLayout}</div>{gameInviteOpen && <GamesModal meId={meId} initialFriendId={openPersonId} onClose={() => setGameInviteOpen(false)} />}</>;
   return <Panel title="Чат" subtitle={connected ? "Свързан в реално време. Съобщенията са видими само за участниците." : "Свързване с чата…"}>{chatLayout}</Panel>;
 }
 function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: (x: string) => void; chatAlerts: ChatAlert[]; onReadMessages: (handle: string) => void }) {
@@ -396,7 +486,7 @@ function MapPanel({ me, notify, chatAlerts, onReadMessages }: { me: Me; notify: 
 function PublicProfilePreview({ person, onClose, onSend, onHideFromMap }: { person: Person; onClose: () => void; onSend: () => Promise<void>; onHideFromMap: () => Promise<void> }) {
   const profile = person.profile;
   const rows = [{ label: "Ръст", value: profile.heightCm ? `${profile.heightCm} см` : null }, { label: "Коса", value: profile.hairColor }, { label: "Интереси", value: profile.interestsText }, { label: "Любим филм", value: profile.favoriteMovie }, { label: "Любима книга", value: profile.favoriteBook }, { label: "Занимание", value: profile.occupation }, { label: "Образование", value: profile.education }, { label: "Езици", value: profile.languages }, { label: "Уикенд", value: profile.weekendStyle }, { label: "Първа среща", value: profile.firstDateIdea }].filter((row): row is { label: string; value: string } => typeof row.value === "string" && row.value.trim().length > 0);
-  return <div className="invitation-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="invitation-modal" role="dialog" aria-modal="true" aria-label={`Публичен профил на ${profile.displayName}`} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="modal-close" aria-label="Затвори профила" onClick={onClose}>×</button><div className="invitation-hero">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span>{profile.displayName.slice(0, 1).toUpperCase()}</span>}<div><p>Публичен профил</p><h2>{profile.displayName}</h2><small>{[profile.city, profile.neighborhood].filter(Boolean).join(" · ") || `@${person.handle}`}</small>{profile.lookingFor && <b>{profile.lookingFor}</b>}</div></div>{profile.bio && <p className="invitation-bio">{profile.bio}</p>}{rows.length > 0 && <dl className="invitation-details">{rows.map(({ label, value }) => <div key={label}><span className="invitation-detail-label">{label}</span><span className="invitation-detail-value">{value}</span></div>)}</dl>}<div className="invitation-actions"><button className="primary" onClick={() => void onSend()}>Изпрати покана</button><button type="button" className="profile-map-hide" onClick={() => void onHideFromMap()}>Скрий ме от този човек на картата</button></div></section></div>;
+  return <div className="invitation-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="invitation-modal" role="dialog" aria-modal="true" aria-label={`Публичен профил на ${profile.displayName}`} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="modal-close" aria-label="Затвори профила" onClick={onClose}>×</button><div className="invitation-hero">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span>{profile.displayName.slice(0, 1).toUpperCase()}</span>}<div><p>Публичен профил</p><h2>{profile.displayName}</h2><small>{[profile.city, profile.neighborhood].filter(Boolean).join(" · ") || `@${person.handle}`}</small>{profile.lookingFor && <b>{profile.lookingFor}</b>}</div></div>{profile.bio && <p className="invitation-bio">{profile.bio}</p>}{rows.length > 0 && <dl className="invitation-details">{rows.map(({ label, value }) => <div key={label}><span className="invitation-detail-label">{label}</span><span className="invitation-detail-value">{value}</span></div>)}</dl>}<div className="invitation-actions"><button className="primary" onClick={() => void onSend()}>Изпрати покана</button><ReportButton targetUserId={person.id} /><button type="button" className="profile-map-hide" onClick={() => void onHideFromMap()}>Скрий ме от този човек на картата</button></div></section></div>;
 }function InvitationPreview({ request, onClose, onRespond }: { request: RequestItem; onClose: () => void; onRespond: (action: "accept" | "decline") => Promise<void> }) {
   const person = request.sender;
   if (!person) return null;

@@ -3,6 +3,7 @@ import { requireUserId } from "@/lib/auth";
 import { apiError, fail, ok } from "@/lib/http";
 import { getAppSocket } from "@/lib/app-socket";
 import { sendPushToUser } from "@/lib/web-push";
+import { notifyUser } from "@/lib/notifications";
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -31,6 +32,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
         createdAt: new Date().toISOString(),
       } as const;
       getAppSocket()?.to(`user:${request.senderId}`).emit("notification:friend-request-updated", notification);
+      void notifyUser({ userId: request.senderId, type: "FRIEND_REQUEST_DECLINED", title: "Поканата е отказана", body: `${displayName} отказа поканата ти за приятелство.`, url: "/", payload: { requestId: id }, push: false }).catch((error) => console.error("Could not create friendship notification", error));
       void sendPushToUser(request.senderId, {
         title: "Поканата е отказана",
         body: `${displayName} отказа поканата ти за приятелство.`,

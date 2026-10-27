@@ -65,6 +65,15 @@ enum GameParticipantStatus {
   DECLINED
 }
 
+enum NotificationType {
+  FRIEND_REQUEST
+  FRIEND_REQUEST_ACCEPTED
+  FRIEND_REQUEST_DECLINED
+  NEW_MESSAGE
+  GAME_INVITATION
+  GAME_UPDATE
+}
+
 enum FriendRequestStatus {
   PENDING
   ACCEPTED
@@ -94,6 +103,7 @@ model User {
   conversationMembers   ConversationMember[]
   messages              Message[]
   pushSubscriptions     PushSubscription[]
+  notifications         Notification[]
   visibilitySessions    VisibilitySession[]
   visibilityExclusions  VisibilityExclusion[] @relation("visibilityOwner")
   excludedFrom          VisibilityExclusion[] @relation("visibilityExcluded")
@@ -165,6 +175,20 @@ model PushSubscription {
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  url       String?
+  payload   Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, readAt, createdAt])
 }
 
 model FriendRequest {

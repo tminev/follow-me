@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { apiError, fail, ok } from "@/lib/http";
 import { rewardCompletedGame } from "@/lib/progression";
 import { answersFrom } from "@/lib/three-questions";
+import { notifyUser } from "@/lib/notifications";
 
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("JOIN") }),
@@ -27,10 +28,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (participant.status !== "INVITED") return fail("GAME_ALREADY_JOINED", "Вече участваш в тази игра.", 409);
       await db.gameParticipant.update({ where: { gameId_userId: { gameId: id, userId } }, data: { status: "JOINED", joinedAt: new Date() } });
       await db.gameSession.update({ where: { id }, data: { state: "ACTIVE" } });
+      void notifyUser({ userId: game.createdById, type: "GAME_UPDATE", title: "Играта започна", body: "Поканата ти беше приета. Време е за отговори.", url: "/", payload: { gameId: id } }).catch((error) => console.error("Could not create game notification", error));
     }
     if (input.action === "DECLINE") {
       await db.gameParticipant.update({ where: { gameId_userId: { gameId: id, userId } }, data: { status: "DECLINED", completedAt: new Date() } });
       await db.gameSession.update({ where: { id }, data: { state: "DECLINED" } });
+      void notifyUser({ userId: game.createdById, type: "GAME_UPDATE", title: "Поканата за игра е отказана", body: "Може да избереш друга игра по-късно.", url: "/", payload: { gameId: id } }).catch((error) => console.error("Could not create game notification", error));
     }
     if (input.action === "ANSWER") {
       if (game.state !== "ACTIVE") return fail("GAME_NOT_ACTIVE", "Приеми поканата, преди да отговориш.", 409);
@@ -44,6 +47,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (completed.count) {
         await Promise.all(game.participants.map((item) => rewardCompletedGame(item.userId, id)));
         await db.gameParticipant.updateMany({ where: { gameId: id }, data: { status: "COMPLETED", completedAt: new Date() } });
+        await Promise.all(game.participants.map((item) => notifyUser({ userId: item.userId, type: "GAME_UPDATE", title: "Играта е завършена", body: "Получаваш награда: 30 XP, 10 Искри и 5 лоялност.", url: "/", payload: { gameId: id } })));
       }
     }
     const updated = await db.gameSession.findUnique({ where: { id }, include: { participants: true } });
